@@ -1,0 +1,17 @@
+{
+  "name": "ggtf",
+  "private": true,
+  "description": "Ghost Gibberlink Transmission Framework: a two-way data link over sound",
+  "license": "MIT",
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "build:wasm": "bun scripts/build-wasm.ts",
+    "dev": "bun run --cwd apps/web dev",
+    "build": "bun run --cwd apps/web build",
+    "start": "bun run --cwd apps/web start",
+    "test": "bun run test:rust && bun run test:ts",
+    "test:rust": "cargo test --workspace",
+    "test:ts": "bun test apps/web",
+    "bench": "cargo run --release -p ggtf-core --example bench"
+  }
+}

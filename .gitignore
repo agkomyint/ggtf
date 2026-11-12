@@ -1,0 +1,23 @@
+# Rust build output
+/target
+
+# Bun / Node
+node_modules/
+
+# Next.js (more rules in apps/web/.gitignore)
+.next/
+
+# Local env files
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Local screenshots from scripts/screenshot.ts
+/.shots/
+
+# NOTE: never ignore .kiro/ (the hackathon requires it in the repo).
+# apps/web/public/wasm/ is committed on purpose so the app runs without Rust.

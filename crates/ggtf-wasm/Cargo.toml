@@ -1,0 +1,15 @@
+[package]
+name = "ggtf-wasm"
+description = "WebAssembly bindings for the GGTF core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ggtf-core = { path = "../ggtf-core" }
+wasm-bindgen = "0.2"
+serde_json = "1"
+getrandom = { version = "0.2", features = ["js"] }

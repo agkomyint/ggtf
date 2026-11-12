@@ -1,0 +1,31 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const __wbg_wasmstation_free: (a: number, b: number) => void;
+export const bench_run: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+export const bench_sample: (a: number, b: number, c: number, d: number) => [number, number];
+export const profiles_json: () => [number, number];
+export const scenarios_json: () => [number, number];
+export const wasmstation_accept: (a: number, b: number) => number;
+export const wasmstation_call: (a: number, b: number) => void;
+export const wasmstation_confirm: (a: number, b: number) => void;
+export const wasmstation_decline: (a: number) => void;
+export const wasmstation_hangup: (a: number, b: number) => void;
+export const wasmstation_id: (a: number) => number;
+export const wasmstation_new: (a: number, b: number) => number;
+export const wasmstation_poll_tx: (a: number, b: number) => [number, number];
+export const wasmstation_push_samples: (a: number, b: number, c: number, d: number) => void;
+export const wasmstation_reject: (a: number, b: number) => void;
+export const wasmstation_send_text: (a: number, b: number, c: number, d: number) => number;
+export const wasmstation_set_answer: (a: number, b: number) => void;
+export const wasmstation_stats: (a: number) => [number, number];
+export const wasmstation_take_events: (a: number) => [number, number];
+export const wasmstation_tick: (a: number, b: number) => void;
+export const wasmstation_tx_done: (a: number, b: number) => void;
+export const __wbindgen_exn_store: (a: number) => void;
+export const __externref_table_alloc: () => number;
+export const __wbindgen_externrefs: WebAssembly.Table;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __wbindgen_start: () => void;
