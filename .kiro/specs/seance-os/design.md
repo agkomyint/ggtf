@@ -60,6 +60,21 @@ On a new DATA frame, the receiver waits up to 350 ms before sending the ACK. If 
 
 `call_tagged(tag)` puts up to 16 bytes in the CALL payload. `Incoming { from, tag }` and `Answering { from, tag }` report it. Séance OS uses the first 8 bytes of the app id.
 
+### Progress, backoff and Turbo (added after real-air testing)
+
+- `MsgProgress { id, sent, total }` fires on the sender after each acknowledged fragment. `MsgPartial { kind, bytes }` fires on the receiver for each fragment except the last. They reach the SDK as the `onProgress` callback and the `peer:receiving` event.
+- Retry timers add a random 0–1.2 s spread per attempt (up to 3.6 s). A deferred timer resumes at a random point 0–1.5 s after the incoming frame ends.
+- The line test skips Turbo (poltergeist) unless `set_turbo(true)`. In real air it passed the 24-byte test but lost 200-byte frames: a 1 KB letter took 51.7 s on Turbo and 37.5 s on Banshee.
+
+### Turn-taking above the link
+
+- The caller sends HELLO at once. The answerer replies when HELLO arrives (its reply carries the link ACK), or after 30 s if none arrives.
+- GhostDB sync: the answerer pulls first. The caller pulls after serving that pull, or after 20 s. Spirits without the `db` permission skip sync entirely.
+
+## 1b. Starter spirits
+
+`scripts/pack-starters.ts` signs every template with the key in `.secrets/starter-key.hex` (or `GGTF_STARTER_KEY`). It writes `public/spirits/<key>.ggs` and `index.json` (author, words, files). On load, `starters.ts` installs bundles whose author matches the index and that the user hasn't removed (`localStorage` `ggtf.starters.removed`). It updates older starters but never replaces a spirit the user received or made.
+
 ## 2. Bundles (`crates/ggtf-core/src/bundle.rs`)
 
 ```
@@ -127,7 +142,7 @@ Record: `{k, v, c (Lamport clock), d (device id), x (deleted), l (local sequence
 | Transport | Used by | How |
 |---|---|---|
 | Instant | Studio | in-memory pair, delivered on the next microtask |
-| Sim air | Studio | `WasmDuo` in the worker: two Rust stations, mixed audio, Gaussian noise and chunk loss, auto-pair and auto-confirm, runs faster than real time |
+| Sim air | Studio | `WasmDuo` in the worker: two Rust stations, mixed audio, Gaussian noise and chunk loss, a chosen band, auto-pair and auto-confirm, runs faster than real time |
 | Real sound | Séance OS | `useStation` link, message kind 1 |
 
 ## 8. Pages

@@ -60,3 +60,15 @@ Order matters: the link comes first, because GGTP, GhostDB and two-peer spirits 
 - [x] 7.2 `/docs` page; README section; navigation links
 - [x] 7.3 Browser check script: studio two-peer sim air run, publish, OS install from a loopback beam
 - _Requirements: 7.4, 8_
+
+## Phase 8: After real-air testing
+
+- [x] 8.1 Grow the random backoff per attempt; randomise the end of deferred timers (fixes the confirm collision)
+- [x] 8.2 Caller sends HELLO first; GhostDB pulls take turns; no sync for spirits without `db`
+- [x] 8.3 Band choice in the share dialog, next to Play together, and in Studio's sim air
+- [x] 8.4 Progress events (`MsgProgress`, `MsgPartial`) through to `peer.send({ onProgress })` and `peer:receiving`; `peer.send` resolves on delivery
+- [x] 8.5 Turbo is no longer picked by the line test unless turned on
+- [x] 8.6 Ghost Post and Séance Sketch templates
+- [x] 8.7 Starter spirits: `scripts/pack-starters.ts`, `public/spirits/`, install on first visit, remember removals, Restore button
+- [x] 8.8 Checks: 1 KB progress test in Rust; Chrome check for starters, the lookalike warning, every band in sim air, and a 1 KB letter over real sound
+- _Requirements: 1.8–1.10, 4.5–4.7, 4b, 7.4_

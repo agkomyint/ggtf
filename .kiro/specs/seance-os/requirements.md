@@ -34,6 +34,9 @@ Out of scope: groups of 3 or more peers in one session (stretch goal), spirits t
 5. WHILE connected with no traffic for the keep-alive interval, THE link SHALL send an authenticated keep-alive. WHEN the keep-alive fails after all retries, THE link SHALL end the session with "link lost".
 6. THE caller MAY attach a tag of up to 16 bytes to its CALL frames. THE answerer SHALL report the tag with the incoming call.
 7. Text chat on `/link` SHALL keep working unchanged for the user.
+8. WHILE a long message is being sent, THE link SHALL report progress (bytes acknowledged of the total) to the sender, and bytes received so far to the receiver.
+9. THE line test SHALL NOT pick the experimental Turbo profile unless it is turned on explicitly.
+10. Retry timers SHALL use a random backoff that grows with each attempt, so two stations that collided don't resend in step.
 
 ### Requirement 2: Bundles and authorship
 
@@ -64,6 +67,15 @@ Out of scope: groups of 3 or more peers in one session (stretch goal), spirits t
 2. WHEN a call with a known app tag arrives, THE OS SHALL name the spirit in the incoming-call prompt.
 3. WHEN the link connects, both sides SHALL exchange a HELLO with the app id, version and bundle hash, and SHALL only start the spirit session when the hashes match. On a mismatch, both sides SHALL show why.
 4. Either peer SHALL be able to send messages, serve GGTP requests and make GGTP requests.
+5. THE caller SHALL send HELLO first and the answerer SHALL reply, so the two don't talk over each other. GhostDB pulls SHALL take turns the same way.
+6. THE user SHALL be able to choose the band (low, mid, high) for Play together and for sharing a spirit.
+7. `spirit.peer.send` SHALL resolve only once the peer has the whole message, and SHALL accept an `onProgress` callback.
+
+### Requirement 4b: Starter spirits
+
+1. Séance OS SHALL install a set of starter spirits on first visit, signed by one GGTF key so every device has identical copies and can play them together without sharing first.
+2. THE OS SHALL only install starters signed by the key named in the starter index.
+3. WHEN the user removes a starter, THE OS SHALL NOT reinstall it until the user asks to restore the starters.
 
 ### Requirement 5: GGTP
 
@@ -84,7 +96,7 @@ Out of scope: groups of 3 or more peers in one session (stretch goal), spirits t
 1. THE studio SHALL provide a code editor for the manifest, HTML, JavaScript and CSS, with a layout that works on desktop and phone.
 2. THE studio SHALL run the spirit in a preview. For `peers: 2`, it SHALL run two previews connected by either an instant transport or simulated air (the real modem with adjustable noise and audio loss).
 3. THE studio SHALL show a console, a GGTP network log, both GhostDB copies, and a budget with bundle size and install time per speed.
-4. THE studio SHALL offer templates: an offline toy, a two-player game, a shared board and a wiki.
+4. THE studio SHALL offer templates: an offline toy, a two-player game, a shared board, a wiki, a long-letter app and a drawing app.
 5. THE studio SHALL publish a spirit into the device's Séance OS library, signed with the author key.
 6. Projects SHALL be saved in the browser.
 
