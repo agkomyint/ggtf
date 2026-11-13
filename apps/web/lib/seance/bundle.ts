@@ -37,9 +37,9 @@ export interface InstalledSpirit {
   files: SpiritFiles;
   bundle: Uint8Array;
   installedAt: number;
-  /** Station that shared it with us, or null when published on this device. */
+  /** Station that shared it with us, or null when published on this device or preloaded. */
   from: number | null;
-  origin: "studio" | "sound";
+  origin: "studio" | "sound" | "preloaded";
 }
 
 export const MAX_NAME = 32;

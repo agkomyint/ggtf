@@ -30,7 +30,7 @@ export type StationEvent =
   | { type: "beam_stopped"; id: number; rounds: number }
   | { type: "detect"; score: number }
   | { type: "rx_failed"; stage: string }
-  | { type: "rx_frame"; kind: string; profile: ProfileName; snr: number; from: number; own: boolean }
+  | { type: "rx_frame"; kind: string; profile: ProfileName; band: string; snr: number; from: number; own: boolean }
   | { type: "tx"; kind: string; profile: ProfileName; ms: number };
 
 export interface StationStats {
@@ -63,6 +63,7 @@ export interface LinkInfo {
   backlog: number;
   state: LinkStateName;
   profile: ProfileName;
+  band?: "low" | "mid" | "high";
 }
 
 export interface ProfileInfo {

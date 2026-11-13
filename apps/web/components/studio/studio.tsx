@@ -39,6 +39,11 @@ const SPEEDS = [
   { v: 4, label: "4×" },
   { v: 0, label: "max" },
 ];
+const BANDS = [
+  { v: 0, label: "Low", hint: "0.5–4.1 kHz" },
+  { v: 1, label: "Mid", hint: "1.5–5.1 kHz" },
+  { v: 2, label: "High", hint: "14.5–18.1 kHz" },
+];
 
 interface Line {
   key: number;
@@ -93,6 +98,8 @@ export function Studio() {
   const [noise, setNoise] = useState(0.02);
   const [loss, setLoss] = useState(0);
   const [speed, setSpeed] = useState(1);
+  const [band, setBand] = useState(1);
+  const restartForBand = useRef(false);
   const [running, setRunning] = useState<Running | null>(null);
   const [states, setStates] = useState<{ state: SessionState; detail?: string }[]>([{ state: "offline" }, { state: "offline" }]);
   const [lines, setLines] = useState<Line[]>([]);
@@ -229,7 +236,7 @@ export function Studio() {
       simAir.onStatus = setAirStatus;
       runs[0].session.attach(simAir.a);
       runs[1].session.attach(simAir.b);
-      simAir.start({ noise, loss, speed });
+      simAir.start({ noise, loss, speed, band });
     }
     setRunning({ runs, two, transport, pair, air: simAir, t0 });
     setMobile("run");
@@ -239,6 +246,20 @@ export function Studio() {
   useEffect(() => {
     running?.air?.config({ noise, loss, speed });
   }, [noise, loss, speed, running]);
+
+  // A new band needs a new call: restart the sim-air run on it.
+  useEffect(() => {
+    if (!restartForBand.current) return;
+    restartForBand.current = false;
+    void run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [band]);
+
+  const pickBand = (b: number) => {
+    if (b === band) return;
+    restartForBand.current = runningRef.current?.transport === "air";
+    setBand(b);
+  };
 
   const wipe = async () => {
     if (!draft) return;
@@ -368,6 +389,14 @@ export function Studio() {
                 <span className="w-10 font-mono text-xs">{(loss * 100).toFixed(1)}%</span>
               </div>
               <div className="flex items-center gap-1">
+                <span className="text-xs text-muted-foreground">band</span>
+                {BANDS.map((b) => (
+                  <Button key={b.v} size="xs" variant={band === b.v ? "secondary" : "ghost"} onClick={() => pickBand(b.v)} title={b.hint}>
+                    {b.label}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1">
                 <span className="text-xs text-muted-foreground">speed</span>
                 {SPEEDS.map((s) => (
                   <Button key={s.v} size="xs" variant={speed === s.v ? "secondary" : "ghost"} onClick={() => setSpeed(s.v)}>
@@ -381,7 +410,8 @@ export function Studio() {
             <div className="ml-auto flex items-center gap-2">
               {running.air && airStatus && (
                 <span className="font-mono text-xs text-muted-foreground">
-                  sim {(airStatus.now / 1000).toFixed(1)} s{airStatus.links ? ` · ${airStatus.links[0].state} · ${airStatus.links[0].profile} · ${airStatus.links[0].frag} B` : ""}
+                  sim {(airStatus.now / 1000).toFixed(1)} s
+                  {airStatus.links ? ` · ${airStatus.links[0].state} · ${airStatus.links[0].band ?? ""} band · ${airStatus.links[0].profile} · ${airStatus.links[0].frag} B` : ""}
                 </span>
               )}
               {linkUp ? (

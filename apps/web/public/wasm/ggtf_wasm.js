@@ -80,6 +80,13 @@ export class WasmDuo {
         return ret;
     }
     /**
+     * Band for the next call (0 low, 1 mid, 2 high). The answerer adopts the caller's band.
+     * @param {number} b
+     */
+    set_band(b) {
+        wasm.wasmduo_set_band(this.__wbg_ptr, b);
+    }
+    /**
      * @param {number} p
      */
     set_loss(p) {
@@ -318,6 +325,13 @@ export class WasmStation {
     set_ml(on) {
         const ret = wasm.wasmstation_set_ml(this.__wbg_ptr, on);
         return ret !== 0;
+    }
+    /**
+     * Lets the link pick the experimental Turbo profile (off by default).
+     * @param {boolean} on
+     */
+    set_turbo(on) {
+        wasm.wasmstation_set_turbo(this.__wbg_ptr, on);
     }
     /**
      * @returns {string}

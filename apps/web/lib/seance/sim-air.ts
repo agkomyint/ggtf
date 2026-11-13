@@ -25,6 +25,8 @@ export interface AirOptions {
   loss: number;
   /** 0 = as fast as possible, otherwise a multiple of real time. */
   speed: number;
+  /** 0 low, 1 mid, 2 high. Applies to the next call. */
+  band: number;
 }
 
 type DuoEvent = LinkEvent & { side: 0 | 1; [k: string]: unknown };
@@ -47,7 +49,7 @@ export class SimAir {
   }
 
   start(o: AirOptions, seed = Math.floor(Math.random() * 1e6)) {
-    this.worker.postMessage({ type: "duo-start", seed, noise: o.noise, loss: o.loss, speed: o.speed });
+    this.worker.postMessage({ type: "duo-start", seed, noise: o.noise, loss: o.loss, speed: o.speed, band: o.band });
   }
 
   config(o: Partial<AirOptions>) {

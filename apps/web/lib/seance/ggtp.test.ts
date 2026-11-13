@@ -4,8 +4,8 @@ import { Format, GgtpEndpoint, MsgType, STATUS, decode, encode, isSuccess, packB
 /** Two endpoints wired together, delivering on the next tick like a real transport. */
 function pair(timeoutMs = 1000) {
   const box: { a?: GgtpEndpoint; b?: GgtpEndpoint } = {};
-  const a = new GgtpEndpoint({ send: (x) => setTimeout(() => box.b!.receive(x), 0), timeoutMs });
-  const b = new GgtpEndpoint({ send: (x) => setTimeout(() => box.a!.receive(x), 0), timeoutMs });
+  const a = new GgtpEndpoint({ send: (x) => void setTimeout(() => box.b!.receive(x), 0), timeoutMs });
+  const b = new GgtpEndpoint({ send: (x) => void setTimeout(() => box.a!.receive(x), 0), timeoutMs });
   box.a = a;
   box.b = b;
   return { a, b };

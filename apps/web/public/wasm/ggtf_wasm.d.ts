@@ -20,6 +20,10 @@ export class WasmDuo {
      */
     run(ms: number): void;
     send(side: number, kind: number, data: Uint8Array | number[]): number;
+    /**
+     * Band for the next call (0 low, 1 mid, 2 high). The answerer adopts the caller's band.
+     */
+    set_band(b: number): void;
     set_loss(p: number): void;
     set_noise(sigma: number): void;
     state(side: number): string;
@@ -76,6 +80,10 @@ export class WasmStation {
      * Turns the ML symbol decoder on or off. Returns whether ML is now active.
      */
     set_ml(on: boolean): boolean;
+    /**
+     * Lets the link pick the experimental Turbo profile (off by default).
+     */
+    set_turbo(on: boolean): void;
     stats(): string;
     take_events(): string;
     tick(now: number): void;
@@ -149,6 +157,7 @@ export interface InitOutput {
     readonly wasmduo_now: (a: number) => number;
     readonly wasmduo_run: (a: number, b: number) => void;
     readonly wasmduo_send: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly wasmduo_set_band: (a: number, b: number) => void;
     readonly wasmduo_set_loss: (a: number, b: number) => void;
     readonly wasmduo_set_noise: (a: number, b: number) => void;
     readonly wasmduo_state: (a: number, b: number) => [number, number];
@@ -173,6 +182,7 @@ export interface InitOutput {
     readonly wasmstation_set_band: (a: number, b: number) => void;
     readonly wasmstation_set_keepalive: (a: number, b: number) => void;
     readonly wasmstation_set_ml: (a: number, b: number) => number;
+    readonly wasmstation_set_turbo: (a: number, b: number) => void;
     readonly wasmstation_stats: (a: number) => [number, number];
     readonly wasmstation_take_events: (a: number) => [number, number];
     readonly wasmstation_tick: (a: number, b: number) => void;

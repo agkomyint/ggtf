@@ -124,6 +124,10 @@ pub enum LinkEvent {
     Trained { mask: u8, profile: ProfileId },
     MsgStatus { id: u32, status: MsgStatus },
     MsgReceived { kind: u8, data: Vec<u8> },
+    /// A fragment of our message `id` was acknowledged: `sent` of `total` bytes are across.
+    MsgProgress { id: u32, sent: usize, total: usize },
+    /// A fragment of an incoming message arrived; `bytes` so far (the total isn't known yet).
+    MsgPartial { kind: u8, bytes: usize },
     Retry { what: &'static str, attempt: u32, profile: ProfileId },
     Log { text: String },
     Ended { reason: String },
@@ -234,6 +238,8 @@ pub struct Link {
     clean_streak: u32,
     keepalive_ms: f64,
     keepalive_jitter: f64,
+    /// Allow the experimental Turbo (poltergeist) profile when the line test passes it.
+    turbo: bool,
     pub link_stats: LinkStats,
 }
 
@@ -295,6 +301,7 @@ impl Link {
             clean_streak: 0,
             keepalive_ms: KEEPALIVE_MS,
             keepalive_jitter: 0.0,
+            turbo: false,
             link_stats: LinkStats { frag_limit: MAX_FRAG, ..LinkStats::default() },
         }
     }
@@ -311,6 +318,11 @@ impl Link {
     /// Keep-alive interval while connected and idle; 0 turns keep-alives off.
     pub fn set_keepalive(&mut self, ms: f64) {
         self.keepalive_ms = ms.max(0.0);
+    }
+
+    /// Lets the line test pick the experimental Turbo profile (off by default).
+    pub fn set_turbo(&mut self, on: bool) {
+        self.turbo = on;
     }
 
     /// Fragment size the next DATA frame would use.
@@ -849,7 +861,15 @@ impl Link {
             (FrameType::Train, LinkState::Ringing | LinkState::Training) if !caller => self.on_train(f, rx_profile, now),
             (FrameType::TrainResult, LinkState::Training) if caller => {
                 let mask = f.payload.first().copied().unwrap_or(0);
-                let best = ProfileId::ALL.iter().rev().find(|&&p| mask & (1 << p as u8) != 0).copied().unwrap_or(ProfileId::Wraith);
+                // Turbo passes the short line test but long frames often fail over real air,
+                // so it is only picked when turned on explicitly.
+                let best = ProfileId::ALL
+                    .iter()
+                    .rev()
+                    .filter(|&&p| self.turbo || p != ProfileId::Poltergeist)
+                    .find(|&&p| mask & (1 << p as u8) != 0)
+                    .copied()
+                    .unwrap_or(ProfileId::Wraith);
                 self.timer = None;
                 self.profile = best;
                 self.events.push(LinkEvent::Trained { mask, profile: best });
@@ -1031,6 +1051,7 @@ impl Link {
                     self.events.push(LinkEvent::MsgReceived { kind, data });
                 } else {
                     self.reasm_at = Some((id, kind, frag + 1));
+                    self.events.push(LinkEvent::MsgPartial { kind, bytes: self.reasm.len() });
                 }
             }
             Some(INNER_PING) => {}
@@ -1085,6 +1106,10 @@ impl Link {
         if inf.last {
             if let Some(id) = inf.msg_id {
                 self.events.push(LinkEvent::MsgStatus { id, status: MsgStatus::Delivered });
+            }
+        } else if let (Some(id), Some(Pending::Msg { id: front, sent, data, .. })) = (inf.msg_id, self.outbox.front()) {
+            if *front == id {
+                self.events.push(LinkEvent::MsgProgress { id, sent: *sent, total: data.len() });
             }
         }
         if inf.bye {

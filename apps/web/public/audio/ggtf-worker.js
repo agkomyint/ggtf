@@ -150,6 +150,7 @@ self.onmessage = async (e) => {
         duo = new WasmDuo(m.seed ?? 7);
         duo.set_noise(m.noise ?? 0);
         duo.set_loss(m.loss ?? 0);
+        if (m.band !== undefined) duo.set_band(m.band);
         duoSpeed = m.speed ?? 0;
         duoDebt = 0;
         duo.connect();
@@ -159,6 +160,7 @@ self.onmessage = async (e) => {
         if (duo) {
           if (m.noise !== undefined) duo.set_noise(m.noise);
           if (m.loss !== undefined) duo.set_loss(m.loss);
+          if (m.band !== undefined) duo.set_band(m.band);
         }
         if (m.speed !== undefined) duoSpeed = m.speed;
         break;

@@ -49,11 +49,15 @@ Measured results:
 
 | Test | Result |
 |---|---|
-| 5 KB message over simulated air | 43.8 B/s (the old chat ran at about 17 B/s) |
+| 1 KB message over real speaker and mic (Ghost Post) | 37.5 s (27 B/s), with progress on both sides |
+| 5 KB message over simulated air | 32 B/s on Fast (the old chat ran at about 17 B/s) |
 | Sharing Ghost Grid (1,214 B) over real speaker and mic | 28 s |
-| From Play together to playing | 28 s |
-| One move crossing the room | 1.2 s |
-| The reply move coming back | 1.8 s |
+| From Play together to playing | about 30 s |
+| One move crossing the room | 1.2–2.8 s |
+
+Séance OS ships six **starter spirits** (`apps/web/public/spirits/`, signed with one key by `bun scripts/pack-starters.ts`). Every device has identical copies, so two people can play them together without sharing first. The signing key lives in `.secrets/` and is not committed.
+
+The link no longer picks Turbo on its own. It passed the short line test but lost long frames over real air.
 
 To check everything in Chrome, run `bun scripts/seance-check.ts http://localhost:3210`. Add `--air` to also share and play over the real speaker and mic.
 

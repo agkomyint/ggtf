@@ -67,7 +67,9 @@ describe("SpiritSession", () => {
     a.ggtp.route("GET", "/board", () => [1, 2, 3]);
     wire.connect();
     await wait();
-    expect(a.send("move", { x: 1 })).toBe(true);
+    const sent: number[] = [];
+    expect(await a.send("move", { x: 1 }, (s) => sent.push(s))).toBe(true);
+    expect(sent.length).toBe(1);
     await wait();
     expect(got).toEqual([["move", { x: 1 }]]);
     expect((await b.ggtp.request("GET", "/board")).body).toEqual([1, 2, 3]);
@@ -77,7 +79,7 @@ describe("SpiritSession", () => {
     expect(a.state).toBe("offline");
     expect(left).toEqual(["link lost"]);
     expect((await a.ggtp.request("GET", "/board")).status).toBe(STATUS.UNAVAILABLE);
-    expect(a.send("move", {})).toBe(false);
+    expect(await a.send("move", {})).toBe(false);
   });
 
   test("reserved topics and DB routes are off limits to apps", async () => {

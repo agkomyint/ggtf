@@ -1,0 +1,59 @@
+{
+  "author": "3c65c55b5a7321156d04e2e3944ceda3a8f57d7219faa6656f9f8f2a3ebce0fa",
+  "words": [
+    "lich",
+    "hollow",
+    "moon",
+    "potion"
+  ],
+  "spirits": [
+    {
+      "key": "fortune",
+      "file": "/spirits/fortune.ggs",
+      "name": "Fortune Teller",
+      "version": 1,
+      "bytes": 712,
+      "hash": "1999110c3ce08fcd9e3f59aa377795977229d2ecf82c898760f84d67b373988a"
+    },
+    {
+      "key": "grid",
+      "file": "/spirits/grid.ggs",
+      "name": "Ghost Grid",
+      "version": 1,
+      "bytes": 1214,
+      "hash": "7eb12c8822490eaf8d71292ea8ecd2e04381000ae2a85ea3578fa57d380e205d"
+    },
+    {
+      "key": "board",
+      "file": "/spirits/board.ggs",
+      "name": "Spirit Board",
+      "version": 1,
+      "bytes": 990,
+      "hash": "6507200953d09bd031e7c6c8c7205d8b2d2b43d06fbbba45a060df86fdc007f8"
+    },
+    {
+      "key": "wiki",
+      "file": "/spirits/wiki.ggs",
+      "name": "Ghost Wiki",
+      "version": 1,
+      "bytes": 1637,
+      "hash": "fbebb6b17faec0e7881d6800173d4322ad9f84dc8ee7622d460434efc292a8da"
+    },
+    {
+      "key": "post",
+      "file": "/spirits/post.ggs",
+      "name": "Ghost Post",
+      "version": 1,
+      "bytes": 1526,
+      "hash": "04f7c0d5f848e577e731579f93bd28a54780add00e0d81f2f413e898a21827fa"
+    },
+    {
+      "key": "sketch",
+      "file": "/spirits/sketch.ggs",
+      "name": "Séance Sketch",
+      "version": 1,
+      "bytes": 1620,
+      "hash": "8136667d5f8eaadbd0666b1274df063a5c6fa8532de7d42b4f905fb2eee96ed8"
+    }
+  ]
+}

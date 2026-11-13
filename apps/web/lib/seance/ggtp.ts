@@ -183,7 +183,7 @@ interface Pending {
 }
 
 export interface EndpointOptions {
-  send: (bytes: Uint8Array) => void;
+  send: (bytes: Uint8Array, onProgress?: (sent: number, total: number) => void) => Promise<boolean> | void;
   timeoutMs?: number;
   onTrace?: (t: TraceEntry) => void;
   onMsg?: (topic: string, body: unknown) => void;
@@ -217,10 +217,10 @@ export class GgtpEndpoint {
 
   constructor(private opts: EndpointOptions) {}
 
-  private out(m: GgtpMessage) {
+  private out(m: GgtpMessage, onProgress?: (sent: number, total: number) => void): Promise<boolean> {
     const bytes = encode(m);
     this.opts.onTrace?.({ dir: "out", msg: m, bytes: bytes.length });
-    this.opts.send(bytes);
+    return Promise.resolve(this.opts.send(bytes, onProgress) ?? true);
   }
 
   private token(): number {
@@ -284,11 +284,11 @@ export class GgtpEndpoint {
     return tokens.size;
   }
 
-  sendMsg(topic: string, body: unknown) {
-    if (this.closed) return false;
+  /** Sends a peer message. Resolves true once the other side has it all, false if it was lost. */
+  sendMsg(topic: string, body: unknown, onProgress?: (sent: number, total: number) => void): Promise<boolean> {
+    if (this.closed) return Promise.resolve(false);
     const { format, body: bytes } = packBody(body);
-    this.out({ type: MsgType.Msg, code: 0, token: 0, format, path: topic, body: bytes });
-    return true;
+    return this.out({ type: MsgType.Msg, code: 0, token: 0, format, path: topic, body: bytes }, onProgress);
   }
 
   sendHello(body: unknown) {

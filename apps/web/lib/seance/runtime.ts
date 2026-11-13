@@ -31,7 +31,7 @@ h1,h2,h3{margin:.2em 0 .4em;font-weight:600}a{color:var(--accent)}.muted{color:v
 const SDK = String.raw`
 (function () {
   var ME = __ME__;
-  var seq = 0, pending = {}, handlers = {}, topics = {}, served = {}, watches = {}, dbw = [];
+  var seq = 0, pending = {}, handlers = {}, topics = {}, served = {}, watches = {}, dbw = [], progress = {};
   function post(m) { parent.postMessage(m, "*"); }
   function call(fn) {
     var args = Array.prototype.slice.call(arguments, 1);
@@ -73,6 +73,7 @@ const SDK = String.raw`
       if (m.name === "peer:msg") (topics[m.data.topic] || []).slice().forEach(function (fn) { try { fn(m.data.body); } catch (err) { console.error(err); } });
       else if (m.name === "db:change") dbw.forEach(function (w) { if (m.data.key.indexOf(w.p) === 0) { try { w.fn(m.data); } catch (err) { console.error(err); } } });
       else if (m.name === "ggtp:notify") { var w = watches[m.data.wid]; if (w) { try { w(m.data.body); } catch (err) { console.error(err); } } }
+      else if (m.name === "peer:progress") { var pf = progress[m.data.pid]; if (pf) { try { pf(m.data.sent, m.data.total); } catch (err) { console.error(err); } } }
       else {
         if (m.name === "peer:join") { spirit.peer.connected = true; spirit.peer.info = m.data; }
         if (m.name === "peer:leave") { spirit.peer.connected = false; spirit.peer.info = null; }
@@ -92,7 +93,13 @@ const SDK = String.raw`
     peer: {
       connected: false,
       info: null,
-      send: function (topic, data) { return call("peer.send", topic, data === undefined ? null : data); },
+      send: function (topic, data, opts) {
+        var fn = opts && opts.onProgress, pid = null;
+        if (fn) { pid = "p" + (++seq); progress[pid] = fn; }
+        var p = call("peer.send", topic, data === undefined ? null : data, pid);
+        if (pid) p.then(function () { delete progress[pid]; }, function () { delete progress[pid]; });
+        return p;
+      },
       on: function (topic, fn) { return on(topics, topic, fn); }
     },
     db: {

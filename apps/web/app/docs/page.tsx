@@ -112,8 +112,12 @@ spirit.log("hello")       // same as console.log; shows in the studio console
 
 // peer messages (needs "peer")
 spirit.peer.connected     // true while another device is in the session
-await spirit.peer.send("move", { i: 4 })
+await spirit.peer.send("move", { i: 4 })          // resolves once the other side has it
+await spirit.peer.send("letter", longText, {      // up to ~11 KB; about 27 bytes per second
+  onProgress: (sent, total) => …
+})
 spirit.peer.on("move", data => …)
+spirit.on("peer:receiving", r => …)  // r.bytes so far, while a long message arrives
 
 // GhostDB (needs "db")
 await spirit.db.put("note:1", { text: "boo" })
@@ -181,6 +185,10 @@ spirit.notify("/score", 3)        // tells everyone watching /score`}</Code>
             <li>Your author key is made in this browser the first time you publish and never leaves it. People see it as four words.</li>
             <li>The app id is a hash of your public key and the spirit name. A spirit with the same name from someone else is a different spirit, and the install screen warns about it.</li>
             <li>Anyone can share a spirit they received. Changing a single byte breaks the signature, so the copy C gets from B is exactly what A published.</li>
+            <li>
+              Séance OS comes with six starter spirits signed by one GGTF key, so every device has identical copies and two people can play them together without sharing
+              first. Removed starters stay removed until you press Restore starter spirits.
+            </li>
             <li>Sharing uses Haunted QR beams: the bundle is cut into 196-byte pieces that repeat in rounds, so listeners who miss a piece get it next round.</li>
             <li>Two devices only play together when their bundle hashes match. Raise the version when you change a spirit.</li>
           </ul>
@@ -206,7 +214,8 @@ spirit.notify("/score", 3)        // tells everyone watching /score`}</Code>
 
         <Section id="link" title="The link underneath">
           <ul>
-            <li>Messages up to 12,000 bytes, tagged as chat (kind 0) or GGTP (kind 1).</li>
+            <li>Messages up to 12,000 bytes, tagged as chat (kind 0) or GGTP (kind 1). Both sides get progress as the pieces arrive.</li>
+            <li>The line test never picks Turbo for app sessions: it passes the short test but long frames often fail over real air.</li>
             <li>Fragments are sized by the trained speed: 56 bytes on Sturdy, up to 176 on Fast. After a hard-won fragment the size halves; after clean ones it grows back.</li>
             <li>When a reply is ready within 350 ms, the acknowledgement rides inside it, so a request and its response take 3 frames instead of 4.</li>
             <li>Idle links send a keep-alive every 45 s and notice when the other device has gone.</li>

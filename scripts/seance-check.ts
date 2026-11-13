@@ -15,6 +15,7 @@ import { join } from "node:path";
 
 const base = process.argv.find((a) => a.startsWith("http")) ?? "http://localhost:3210";
 const withAir = process.argv.includes("--air");
+const band = process.argv.find((a) => a.startsWith("--band="))?.slice(7);
 const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const t0 = Date.now();
@@ -72,6 +73,12 @@ class Tab {
   click(text: string, selector = "button,[role=tab]") {
     return this.ev<boolean>(
       `(() => { const b = [...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.includes(${JSON.stringify(text)}) && !b.disabled); if (!b) return false; b.click(); return true; })()`,
+    );
+  }
+  /** Clicks a button inside the card whose text contains `card`. */
+  clickInCard(card: string, text: string) {
+    return this.ev<boolean>(
+      `(() => { const c = [...document.querySelectorAll('[data-slot=card]')].find(c => c.textContent.includes(${JSON.stringify(card)})); const b = c && [...c.querySelectorAll('button')].find(b => b.textContent.includes(${JSON.stringify(text)})); if (!b) return false; b.click(); return true; })()`,
     );
   }
   text() {
@@ -192,6 +199,20 @@ try {
   const moved = await S.waitIn(sp.b, `${markIn} === "👻"`, 60_000);
   step("sim air: A's move crosses the simulated air to B", moved, `${((Date.now() - tMove) / 1000).toFixed(1)} s real at 1×`);
 
+  for (const label of ["Low", "High"]) {
+    await S.click(label);
+    await sleep(800);
+    const tb = Date.now();
+    const ready = await S.waitText(allReady(2), 120_000);
+    const onBand = await S.waitText(new RegExp(`${label.toLowerCase()} band`), 5000);
+    step(`sim air on the ${label} band: pair and HELLO`, ready && onBand, `${((Date.now() - tb) / 1000).toFixed(1)} s real`);
+    await sleep(500);
+    sp = await S.spirits();
+    await S.ev(`document.querySelector('#board button:not(:disabled)').click()`, sp.a);
+    step(`sim air on the ${label} band: a move crosses`, await S.waitIn(sp.b, `${markIn} === "👻"`, 60_000));
+  }
+  await S.click("Mid");
+
   // Spirit Board: GhostDB sync, including offline edits merged on reconnect.
   await S.click("Instant");
   await S.click("New");
@@ -242,6 +263,8 @@ try {
   step("publish signs Ghost Grid into the library", await S.waitText(/Ghost Grid v1 is in your Séance OS library/, 15000));
   await S.goto(`${base}/seance`);
   step("Séance OS lists it as published here", await S.waitText(/Ghost Grid[\s\S]*published on this device/, 10000));
+  const starters = await S.ev<number>(`new Promise(r => setTimeout(() => r((document.body.innerText.match(/comes with Séance OS/g) || []).length), 4000))`);
+  step("starter spirits are preinstalled", starters === 6, `${starters} starters`);
 
   // ---------------- part 2: real air ----------------
   if (withAir) {
@@ -257,21 +280,24 @@ try {
     await B.click("Turn on sound");
     step("both devices listening", (await A.waitText(/listening/, 15000)) && (await B.waitText(/listening/, 15000)));
     await B.click("Receive");
-    await A.click("Share over sound");
+    await A.clickInCard("published on this device", "Share over sound");
     await sleep(500);
+    if (band) step(`share dialog switches to the ${band} band`, await A.click(band[0].toUpperCase() + band.slice(1)));
     await A.click("Start beaming");
     const tShare = Date.now();
     const offered = await B.waitText(/Summon “Ghost Grid”\?/, 300_000);
     step("B hears the spirit and checks its signature", offered, `${((Date.now() - tShare) / 1000).toFixed(1)} s`);
     await A.click("Stop");
     await A.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-    await B.click("Summon");
+    step("B is warned: same name as its starter Ghost Grid, different author", await B.waitText(/Same name, different author/, 3000));
+    (await B.click("Summon")) || (await B.click("Install anyway"));
     step("B installs it", await B.waitText(/bound to this device/, 5000));
     await sleep(1500);
     step("B's library lists it, from A's station", await B.waitText(/Ghost Grid[\s\S]*received from #/, 5000));
-    await B.click("Open");
-    await A.click("Open");
+    await B.clickInCard("received from", "Open");
+    await A.clickInCard("published on this device", "Open");
     await sleep(1500);
+    if (band) step(`Play together set to the ${band} band`, await B.click(band[0].toUpperCase() + band.slice(1), "[aria-label='Band for Play together'] button"));
     step("B can press Play together", await B.click("Play together"));
     const tCall = Date.now();
     step("A is asked to play Ghost Grid", await A.waitText(/Play Ghost Grid\?/, 60_000));
@@ -299,6 +325,36 @@ try {
     const tr = Date.now();
     const back = await mover.waitIn(cm, `[...document.querySelectorAll('#board button')].some(b => b.textContent === "🎃")`, 90_000);
     step("the reply move crosses back", back, `${((Date.now() - tr) / 1000).toFixed(1)} s`);
+
+    // A preloaded starter: both devices already have the same signed Ghost Post, no sharing needed.
+    for (const t of [A, B]) await t.ev(`document.querySelector('button[aria-label="Close spirit"]').click()`);
+    await sleep(9000);
+    await B.clickInCard("Ghost Post", "Open");
+    await A.clickInCard("Ghost Post", "Open");
+    await sleep(1500);
+    await B.click("Play together");
+    const tc2 = Date.now();
+    step("A is asked to play the starter Ghost Post", await A.waitText(/Play Ghost Post\?/, 60_000));
+    await A.click("Accept and open");
+    await A.waitText(/Do the words match/, 90_000);
+    await B.waitText(/Do the words match/, 30_000);
+    await A.click("They match");
+    await sleep(2500);
+    await B.click("They match");
+    const ready2 = (await A.waitText(/playing together/, 90_000)) && (await B.waitText(/playing together/, 60_000));
+    step("starter Ghost Post: playing together without sharing first", ready2, `${((Date.now() - tc2) / 1000).toFixed(1)} s from the call`);
+    const pa2 = (await A.spirits()).me;
+    const pb2 = (await B.spirits()).me;
+    const letter = ("Dear spirit, the candles flicker and the floorboards creak. " .repeat(17)).slice(0, 1000);
+    await A.waitIn(pa2, `!document.getElementById('send').disabled`, 10_000);
+    await A.setValue("#text", letter, pa2, "HTMLTextAreaElement");
+    await A.ev(`document.getElementById('send').click()`, pa2);
+    const tl = Date.now();
+    const sawProgress = await A.waitIn(pa2, `/Sending… \\d+ \\/ \\d+ bytes/.test(document.getElementById('status').textContent)`, 60_000);
+    const arrived = await B.waitIn(pb2, `document.getElementById('inbox').textContent.includes("floorboards creak")`, 180_000);
+    const secs = (Date.now() - tl) / 1000;
+    step("a 1,000-byte letter crosses the room, with progress on the sender", arrived && sawProgress, `${secs.toFixed(1)} s = ${(1000 / secs).toFixed(0)} B/s`);
+    step("the sender sees it delivered", await A.waitIn(pa2, `document.getElementById('status').textContent.startsWith("Delivered")`, 15_000), await A.ev(`document.getElementById('status').textContent`, pa2));
   }
 } catch (e) {
   step(`crashed: ${e instanceof Error ? e.stack : e}`, false);

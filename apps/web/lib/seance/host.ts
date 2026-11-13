@@ -14,6 +14,8 @@ export interface HostLog {
 type Call = { t: "call"; id: number; fn: string; args: unknown[] };
 
 const METHODS: Method[] = ["GET", "POST", "PUT", "DELETE"];
+/** One link message carries up to 12,000 bytes; leave room for the GGTP header and topic. */
+export const MAX_PEER_MESSAGE = 11_500;
 
 export class SpiritHost {
   private win: Window | null = null;
@@ -35,6 +37,7 @@ export class SpiritHost {
         peerJoin: (p) => this.evt("peer:join", p),
         peerLeave: (reason) => this.evt("peer:leave", { reason }),
         peerMsg: (topic, body) => this.evt("peer:msg", { topic, body }),
+        receiving: (bytes) => this.evt("peer:receiving", { bytes }),
         synced: (pulled) => this.evt("db:synced", { pulled }),
       }),
     );
@@ -112,7 +115,12 @@ export class SpiritHost {
         this.need("peer");
         const topic = String(a[0] ?? "");
         if (!topic) throw new Error("peer.send needs a topic");
-        if (!s.send(topic, a[1])) throw new Error("no peer is connected");
+        const size = JSON.stringify(a[1] ?? null).length;
+        if (size > MAX_PEER_MESSAGE) throw new Error(`that message is ${size} bytes; one message can carry up to ${MAX_PEER_MESSAGE} (about 4–5 minutes of sound)`);
+        if (s.state !== "ready") throw new Error("no peer is connected");
+        const pid = a[2];
+        const ok = await s.send(topic, a[1], pid ? (sent, total) => this.evt("peer:progress", { pid, sent, total }) : undefined);
+        if (!ok) throw new Error("the message didn't make it across (the link dropped)");
         return true;
       }
       case "ggtp.request": {

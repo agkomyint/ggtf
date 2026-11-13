@@ -25,3 +25,6 @@ Thumbs.db
 # ML training data (regenerate with: cargo run --release -p ggtf-core --example ml_data)
 /ml/data/
 __pycache__/
+
+# Signing key for the starter spirits (scripts/pack-starters.ts). Never commit it.
+/.secrets/

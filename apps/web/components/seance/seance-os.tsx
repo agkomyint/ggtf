@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChunkMap } from "@/components/ggtf/beam-console";
-import { SoundSettings } from "@/components/ggtf/sound-settings";
+import { BAND_INFO, SoundSettings } from "@/components/ggtf/sound-settings";
 import { Spectrogram } from "@/components/ggtf/spectrogram";
 import { InstallDialog, type Offer } from "@/components/seance/install-dialog";
 import { SpiritWindow } from "@/components/seance/spirit-window";
@@ -22,6 +22,7 @@ import { stationLabel } from "@/lib/ggtf/format";
 import { compareInstall, type InstalledSpirit } from "@/lib/seance/bundle";
 import { install, library, remove } from "@/lib/seance/library";
 import { onLibrary } from "@/lib/seance/store";
+import { forgetStarter, installStarters } from "@/lib/seance/starters";
 import { author, isBundle, openBundle } from "@/lib/seance/tools";
 
 const SHARE_PROFILES = [0, 1, 2];
@@ -55,12 +56,21 @@ export function SeanceOS() {
     });
   }, []);
   useEffect(() => {
-    reload();
+    library().then(async (l) => {
+      setLib(l);
+      setLoaded(true);
+      if (await installStarters(l).catch(() => 0)) reload();
+    });
     author()
       .then((a) => setMe(a.publicHex))
       .catch(() => {});
     return onLibrary(reload);
   }, [reload]);
+
+  const restoreStarters = async () => {
+    const n = await installStarters(libRef.current, true);
+    toast(n ? `Restored ${n} starter spirit${n === 1 ? "" : "s"}` : "All starter spirits are already here");
+  };
 
   // Spirits arriving inside beams.
   useEffect(() => {
@@ -191,7 +201,7 @@ export function SeanceOS() {
                       by <span className="text-foreground">{s.words.join(" · ")}</span>
                       {s.author === me ? " (you)" : ""}
                       <br />
-                      {s.origin === "studio" ? "published on this device" : `received from ${stationLabel(s.from)}`}
+                      {s.origin === "studio" ? "published on this device" : s.origin === "preloaded" ? "comes with Séance OS" : `received from ${stationLabel(s.from)}`}
                     </p>
                     <div className="flex flex-wrap gap-2">
                       <Button size="sm" onClick={() => setOpen(s)}>
@@ -209,6 +219,11 @@ export function SeanceOS() {
               ))}
             </div>
           )}
+          <div className="pt-3">
+            <Button size="xs" variant="ghost" onClick={restoreStarters}>
+              Restore starter spirits
+            </Button>
+          </div>
         </TabsContent>
 
         <TabsContent value="receive" className="pt-4">
@@ -275,6 +290,21 @@ export function SeanceOS() {
                   Every device listening nearby gets an exact copy, still signed by its author ({sharing.words.join(" · ")}). {sharing.bundle.length.toLocaleString()} bytes.
                 </DialogDescription>
               </DialogHeader>
+              <div className="space-y-1">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Frequency</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {[0, 1, 2].map((b) => (
+                    <Button key={b} variant={view.band === b ? "default" : "outline"} onClick={() => station.setBand(b)} disabled={view.beam.sending}>
+                      <span className="flex flex-col items-center leading-tight">
+                        {BAND_INFO[b].label}
+                        <span className="text-[10px] opacity-80">{BAND_INFO[b].range.split(" (")[0]}</span>
+                      </span>
+                    </Button>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">{BAND_INFO[view.band]?.hint} Listeners hear all three bands at once, so they don&apos;t need to change anything.</p>
+              </div>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Speed</p>
               <div className="grid grid-cols-3 gap-2">
                 {SHARE_PROFILES.map((p) => (
                   <Button key={p} variant={profile === p ? "default" : "outline"} onClick={() => setProfile(p)} disabled={view.beam.sending}>
@@ -325,7 +355,10 @@ export function SeanceOS() {
             <Button
               variant="destructive"
               onClick={async () => {
-                if (removing) await remove(removing.appId);
+                if (removing) {
+                  if (removing.origin === "preloaded") forgetStarter(removing.appId);
+                  await remove(removing.appId);
+                }
                 setRemoving(null);
               }}
             >

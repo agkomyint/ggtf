@@ -162,9 +162,99 @@ $("w").onsubmit = async e => { e.preventDefault(); await save({ title: $("title"
   },
 };
 
+const post: SpiritSource = {
+  manifest: { name: "Ghost Post", version: 1, icon: "✉️", description: "Send a long letter to the other device. Shows progress while it travels.", peers: 2, permissions: ["peer", "db"] },
+  files: {
+    "index.html": `<h1>✉️ Ghost Post</h1>
+<p id="who" class="muted">Press Play together, then write.</p>
+<textarea id="text" rows="7" maxlength="3000" style="width:100%" placeholder="Dear spirit…"></textarea>
+<p class="muted"><span id="size">0 bytes</span> · about <span id="eta">0</span> s through the air</p>
+<p><button id="send" disabled>Send letter</button></p>
+<div id="bar"><div></div></div><p id="status" class="muted"></p>
+<h2>Inbox</h2><ul id="inbox"></ul>`,
+    "app.js": `// Letters can be a few KB: the SDK reports progress while the link sends them piece by piece.
+const $ = id => document.getElementById(id);
+const bytes = s => new TextEncoder().encode(s).length;
+const bar = p => ($("bar").firstChild.style.width = Math.round(p * 100) + "%");
+$("text").oninput = () => { const n = bytes($("text").value); $("size").textContent = n + " bytes"; $("eta").textContent = Math.max(2, Math.round(n / 35)); };
+$("send").onclick = async () => {
+  const text = $("text").value.trim();
+  if (!text) return;
+  const t0 = Date.now();
+  $("send").disabled = true;
+  $("status").textContent = "Sending…";
+  try {
+    await spirit.peer.send("letter", { text, at: t0 }, { onProgress: (sent, total) => { bar(sent / total); $("status").textContent = "Sending… " + sent + " / " + total + " bytes"; } });
+    bar(1);
+    $("status").textContent = "Delivered in " + ((Date.now() - t0) / 1000).toFixed(1) + " s.";
+    $("text").value = ""; $("text").oninput();
+  } catch (e) { $("status").textContent = e.message; }
+  $("send").disabled = !spirit.peer.connected;
+};
+spirit.on("peer:receiving", r => { $("status").textContent = "A letter is arriving… " + r.bytes + " bytes so far"; });
+spirit.peer.on("letter", async l => {
+  await spirit.db.put("local:inbox:" + l.at, l);
+  $("status").textContent = "A letter arrived (" + bytes(l.text) + " bytes).";
+  render();
+});
+async function render() {
+  const letters = (await spirit.db.list("local:inbox:")).reverse();
+  $("inbox").innerHTML = letters.length ? "" : "<li class=muted>No letters yet.</li>";
+  letters.forEach(({ value }) => { const li = document.createElement("li"); li.textContent = value.text; $("inbox").append(li); });
+}
+const online = () => { $("send").disabled = !spirit.peer.connected; $("who").textContent = spirit.peer.connected ? "Connected. Write something long." : "Press Play together, then write."; };
+spirit.on("peer:join", online); spirit.on("peer:leave", online);
+online(); render();`,
+    "style.css": `#bar{height:6px;background:#0f2419;border-radius:4px;overflow:hidden;margin:6px 0}#bar div{height:100%;width:0;background:var(--accent);transition:width .3s}
+#inbox{padding:0;list-style:none}#inbox li{white-space:pre-wrap;background:#0f2419;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0}`,
+  },
+};
+
+const sketch: SpiritSource = {
+  manifest: { name: "Séance Sketch", version: 1, icon: "🖌️", description: "Draw something and send it through the air to the other device.", peers: 2, permissions: ["peer"] },
+  files: {
+    "index.html": `<h1>🖌️ Séance Sketch</h1>
+<p id="who" class="muted">Press Play together, then draw.</p>
+<div class="row"><div><p class="muted">Yours</p><canvas id="mine" width="240" height="240"></canvas></div>
+<div><p class="muted">Theirs</p><canvas id="theirs" width="240" height="240"></canvas></div></div>
+<p><button id="send" disabled>Send drawing</button> <button id="clear" class="ghost">Clear</button> <span id="info" class="muted"></span></p>`,
+    "app.js": `// Strokes are packed as 2 characters per point (64 x 64 grid), so a doodle is a few hundred bytes.
+const $ = id => document.getElementById(id);
+const mine = $("mine"), ctx = mine.getContext("2d");
+let strokes = [], cur = null;
+const enc = v => String.fromCharCode(48 + Math.max(0, Math.min(63, Math.round(v / 240 * 63))));
+const pack = () => strokes.map(s => s.map(([x, y]) => enc(x) + enc(y)).join("")).join(" ");
+function draw(c, data) {
+  const g = c.getContext("2d");
+  g.clearRect(0, 0, 240, 240); g.lineWidth = 3; g.lineCap = "round"; g.strokeStyle = "#4ade80";
+  data.split(" ").forEach(s => { g.beginPath(); for (let i = 0; i + 1 < s.length; i += 2) { const x = (s.charCodeAt(i) - 48) / 63 * 240, y = (s.charCodeAt(i + 1) - 48) / 63 * 240; i ? g.lineTo(x, y) : g.moveTo(x, y); } g.stroke(); });
+}
+const pos = e => { const r = mine.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+mine.onpointerdown = e => { cur = [pos(e)]; strokes.push(cur); mine.setPointerCapture(e.pointerId); };
+mine.onpointermove = e => { if (!cur) return; const p = pos(e), l = cur[cur.length - 1]; if (Math.hypot(p[0] - l[0], p[1] - l[1]) > 5) { cur.push(p); draw(mine, pack()); info(); } };
+mine.onpointerup = () => (cur = null);
+const info = () => { const n = pack().length; $("info").textContent = n + " bytes · about " + Math.max(2, Math.round(n / 35)) + " s"; };
+$("clear").onclick = () => { strokes = []; draw(mine, ""); info(); };
+$("send").onclick = async () => {
+  const t0 = Date.now(); $("send").disabled = true;
+  try { await spirit.peer.send("sketch", pack(), { onProgress: (s, t) => ($("info").textContent = "sending " + Math.round(s / t * 100) + "%") }); $("info").textContent = "delivered in " + ((Date.now() - t0) / 1000).toFixed(1) + " s"; }
+  catch (e) { $("info").textContent = e.message; }
+  $("send").disabled = !spirit.peer.connected;
+};
+spirit.on("peer:receiving", r => ($("info").textContent = "a drawing is arriving… " + r.bytes + " bytes"));
+spirit.peer.on("sketch", d => { draw($("theirs"), d); $("info").textContent = "their drawing arrived"; });
+const online = () => { $("send").disabled = !spirit.peer.connected; $("who").textContent = spirit.peer.connected ? "Connected. Draw on the left." : "Press Play together, then draw."; };
+spirit.on("peer:join", online); spirit.on("peer:leave", online);
+online();`,
+    "style.css": `.row{display:flex;gap:12px;flex-wrap:wrap}canvas{background:#0b1a12;border:1px solid var(--line);border-radius:8px;touch-action:none}`,
+  },
+};
+
 export const TEMPLATES: Template[] = [
   { key: "fortune", title: "Fortune Teller", blurb: "Offline toy. No permissions.", source: fortune },
   { key: "grid", title: "Ghost Grid", blurb: "Two-player game with peer messages.", source: grid },
   { key: "board", title: "Spirit Board", blurb: "Shared notes with GhostDB sync.", source: board },
   { key: "wiki", title: "Ghost Wiki", blurb: "Serve and fetch pages over GGTP.", source: wiki },
+  { key: "post", title: "Ghost Post", blurb: "Long letters (up to 3 KB) with a progress bar.", source: post },
+  { key: "sketch", title: "Séance Sketch", blurb: "Draw, then send the drawing through the air.", source: sketch },
 ];

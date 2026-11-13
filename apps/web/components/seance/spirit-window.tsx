@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SpiritFrame } from "@/components/seance/spirit-frame";
+import { BAND_INFO } from "@/components/ggtf/sound-settings";
 import type { useStation } from "@/hooks/use-station";
 import { STATE_LABEL, stationLabel } from "@/lib/ggtf/format";
 import { callTag, type InstalledSpirit } from "@/lib/seance/bundle";
@@ -107,9 +108,24 @@ export function SpiritWindow({ spirit, station, onClose }: { spirit: InstalledSp
                 <PhoneOff /> Hang up
               </Button>
             ) : (
-              <Button size="sm" onClick={() => station.callTagged(callTag(spirit.appId))}>
-                <PhoneCall /> Play together
-              </Button>
+              <>
+                <div className="flex overflow-hidden rounded-md border border-border" role="group" aria-label="Band for Play together">
+                  {["Low", "Mid", "High"].map((label, b) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => station.setBand(b)}
+                      title={BAND_INFO[b].range.split(" (")[0]}
+                      className={`px-2 py-1 text-xs ${view.band === b ? "bg-secondary text-secondary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <Button size="sm" onClick={() => station.callTagged(callTag(spirit.appId))}>
+                  <PhoneCall /> Play together
+                </Button>
+              </>
             )}
           </>
         )}
@@ -143,7 +159,7 @@ export function SpiritWindow({ spirit, station, onClose }: { spirit: InstalledSp
         )}
         {view.stats?.link && linkBusy && (
           <span className="ml-auto shrink-0">
-            {view.stats.link.profile} · {view.stats.link.frag} B fragments
+            {view.stats.link.band ?? view.stats.band} band · {view.stats.link.profile} · {view.stats.link.frag} B fragments
           </span>
         )}
         {lastError && <span className="ml-auto shrink-0 text-destructive">{lastError.text}</span>}

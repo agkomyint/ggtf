@@ -27,6 +27,8 @@ export interface SessionEvents {
   peerLeave?: (reason: string) => void;
   peerMsg?: (topic: string, body: unknown) => void;
   synced?: (pulled: number) => void;
+  /** A long message from the peer is arriving: bytes so far. */
+  receiving?: (bytes: number) => void;
   trace?: (t: TraceEntry) => void;
   log?: (text: string) => void;
 }
@@ -82,11 +84,12 @@ export class SpiritSession {
       peerLeave: fan("peerLeave"),
       peerMsg: fan("peerMsg"),
       synced: fan("synced"),
+      receiving: fan("receiving"),
       trace: fan("trace"),
       log: fan("log"),
     };
     this.ggtp = new GgtpEndpoint({
-      send: (bytes) => this.sendBytes(bytes),
+      send: (bytes, onProgress) => this.sendBytes(bytes, onProgress),
       onTrace: (t) => this.ev.trace?.(t),
       onHello: (b) => this.onHello(b as Hello),
       onMsg: (topic, body) => this.onMsg(topic, body),
@@ -113,13 +116,14 @@ export class SpiritSession {
   }
 
   /** Hands bytes to the transport at once; the link keeps them in order. */
-  private sendBytes(bytes: Uint8Array) {
-    void this.transport?.send(bytes);
+  private sendBytes(bytes: Uint8Array, onProgress?: (sent: number, total: number) => void): Promise<boolean> {
+    return this.transport ? this.transport.send(bytes, onProgress) : Promise.resolve(false);
   }
 
   attach(t: Transport) {
     this.transport = t;
     t.onReceive = (b) => this.ggtp.receive(b);
+    t.onPartial = (n) => this.state === "ready" && this.ev.receiving?.(n);
     t.onLink = (up, reason) => (up ? this.linkUp() : this.linkDown(reason ?? "the link closed"));
     if (t.up) this.linkUp();
   }
@@ -127,6 +131,7 @@ export class SpiritSession {
   detach() {
     if (this.transport) {
       this.transport.onReceive = null;
+      this.transport.onPartial = null;
       this.transport.onLink = null;
     }
     this.linkDown("left the spirit");
@@ -245,10 +250,10 @@ export class SpiritSession {
     this.ev.synced?.(pulled);
   }
 
-  /** Sends a peer message; false when no peer is ready. */
-  send(topic: string, body: unknown): boolean {
-    if (this.state !== "ready") return false;
+  /** Sends a peer message. Resolves true once delivered; false when no peer is ready or it was lost. */
+  send(topic: string, body: unknown, onProgress?: (sent: number, total: number) => void): Promise<boolean> {
     if (topic.startsWith("~")) throw new Error("topics starting with ~ are reserved");
-    return this.ggtp.sendMsg(topic, body);
+    if (this.state !== "ready") return Promise.resolve(false);
+    return this.ggtp.sendMsg(topic, body, onProgress);
   }
 }

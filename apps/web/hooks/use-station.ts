@@ -255,7 +255,7 @@ export function useStation() {
           addLog(`heard a ${e.stage === "marker" ? "preamble" : e.stage} but couldn't decode it`, "warn");
           break;
         case "rx_frame":
-          if (!e.own) addLog(`← ${e.kind} from ${stationLabel(e.from)} (${e.profile}, ${e.snr.toFixed(1)} dB)`, "rx");
+          if (!e.own) addLog(`← ${e.kind} from ${stationLabel(e.from)} (${e.profile}, ${e.band} band, ${e.snr.toFixed(1)} dB)`, "rx");
           break;
         case "tx":
           setView((v) => ({ ...v, txKind: e.kind }));

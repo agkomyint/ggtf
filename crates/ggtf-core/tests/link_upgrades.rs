@@ -97,6 +97,40 @@ fn call_tag_reaches_the_answerer() {
 }
 
 #[test]
+fn one_kilobyte_reports_progress_both_ways() {
+    let mut d = Duo::new(6);
+    d.noise = 0.02;
+    connect(&mut d);
+    let msg: Vec<u8> = (0..1000u32).map(|i| (i * 7 + 3) as u8).collect();
+    let t0 = d.now;
+    let now = d.now;
+    let id = d.st[0].send_msg(KIND_GGTP, &msg, now).unwrap();
+    assert!(d.run_until(300_000.0, |d| !received(d.events(), 1).is_empty()), "1 KB never arrived");
+    let secs = (d.now - t0) / 1000.0;
+    let ev = d.take_events();
+    let progress: Vec<usize> = ev
+        .iter()
+        .filter_map(|(s, e)| match e {
+            StationEvent::Link(LinkEvent::MsgProgress { id: i, sent, total }) if *s == 0 && *i == id => {
+                assert_eq!(*total, 1000);
+                Some(*sent)
+            }
+            _ => None,
+        })
+        .collect();
+    let partial: Vec<usize> = ev
+        .iter()
+        .filter_map(|(s, e)| match e {
+            StationEvent::Link(LinkEvent::MsgPartial { bytes, .. }) if *s == 1 => Some(*bytes),
+            _ => None,
+        })
+        .collect();
+    assert!(progress.len() >= 4 && progress.windows(2).all(|w| w[0] < w[1]), "sender progress: {progress:?}");
+    assert!(partial.len() >= 4 && partial.windows(2).all(|w| w[0] < w[1]), "receiver progress: {partial:?}");
+    println!("1000 bytes in {secs:.1} s ({:.1} B/s) on {:?}", 1000.0 / secs, d.st[0].link.profile());
+}
+
+#[test]
 fn long_message_survives_noise_and_dropouts() {
     let mut d = Duo::new(5);
     d.noise = 0.05;

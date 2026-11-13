@@ -64,6 +64,8 @@ fn event_json(e: &StationEvent) -> Value {
                 "text": if *kind == ggtf_core::link::KIND_TEXT { String::from_utf8_lossy(data).into_owned() } else { String::new() },
                 "b64": base64(data)
             }),
+            LinkEvent::MsgProgress { id, sent, total } => json!({ "type": "msg_progress", "id": id, "sent": sent, "total": total }),
+            LinkEvent::MsgPartial { kind, bytes } => json!({ "type": "msg_partial", "kind": kind, "bytes": bytes }),
             LinkEvent::Retry { what, attempt, profile } => json!({ "type": "retry", "what": what, "attempt": attempt, "profile": profile.name() }),
             LinkEvent::Log { text } => json!({ "type": "log", "text": text }),
             LinkEvent::Ended { reason } => json!({ "type": "ended", "reason": reason }),
@@ -142,6 +144,11 @@ impl WasmStation {
     /// Keep-alive interval in ms while connected and idle; 0 turns it off.
     pub fn set_keepalive(&mut self, ms: f64) {
         self.inner.link.set_keepalive(ms);
+    }
+
+    /// Lets the link pick the experimental Turbo profile (off by default).
+    pub fn set_turbo(&mut self, on: bool) {
+        self.inner.link.set_turbo(on);
     }
 
     /// Sends a binary message (kind 0 text, 1 GGTP). Returns the message id, or -1.
@@ -230,7 +237,7 @@ fn link_json(l: &ggtf_core::link::Link) -> Value {
     let s = l.link_stats;
     json!({
         "frag": l.frag_size(), "frag_limit": s.frag_limit, "acks": s.acks_sent, "piggybacked": s.acks_piggybacked,
-        "pings": s.pings, "backlog": l.backlog(), "state": l.state().name(), "profile": l.profile().name()
+        "pings": s.pings, "backlog": l.backlog(), "state": l.state().name(), "profile": l.profile().name(), "band": l.band().name()
     })
 }
 
@@ -299,6 +306,13 @@ impl WasmDuo {
 
     pub fn set_loss(&mut self, p: f32) {
         self.inner.loss = p.clamp(0.0, 0.5);
+    }
+
+    /// Band for the next call (0 low, 1 mid, 2 high). The answerer adopts the caller's band.
+    pub fn set_band(&mut self, b: u8) {
+        for st in self.inner.st.iter_mut() {
+            st.set_band(band(b));
+        }
     }
 
     /// Station A calls B; both sides confirm automatically.
