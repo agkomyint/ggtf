@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Check the Rust core on save",
+      "trigger": "PostFileSave",
+      "description": "Type-checks the Rust modem, link, bundle and WASM crates (including tests) whenever a Rust file changes.",
+      "matcher": "crates[\\\\/].*\\.rs$",
+      "action": {
+        "type": "command",
+        "command": "cargo check --workspace --tests",
+        "timeout": 300
+      }
+    }
+  ]
+}

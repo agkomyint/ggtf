@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Run web unit tests on save",
+      "trigger": "PostFileSave",
+      "description": "Runs the Bun tests for GGTP, GhostDB, sessions and bundles whenever a library file under apps/web/lib changes.",
+      "matcher": "apps[\\\\/]web[\\\\/]lib[\\\\/].*\\.ts$",
+      "action": {
+        "type": "command",
+        "command": "bun test apps/web",
+        "timeout": 120
+      }
+    }
+  ]
+}

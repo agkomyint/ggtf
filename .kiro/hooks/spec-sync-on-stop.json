@@ -1,0 +1,14 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Keep specs in sync",
+      "trigger": "Stop",
+      "description": "Keeps the Kiro specs accurate as the code changes.",
+      "action": {
+        "type": "agent",
+        "prompt": "Before ending the turn, check whether the work changed behaviour described in .kiro/specs (ggtf or seance-os). If it did, update the matching requirements, design or tasks file so the specs stay true."
+      }
+    }
+  ]
+}

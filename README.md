@@ -2,6 +2,8 @@
 
 > Talk to machines through the dead air.
 
+**Live demo: [ggtfver.vercel.app](https://ggtfver.vercel.app/)**. Open it on two devices (or two tabs), allow the microphone and turn the volume up. Start at [/seance](https://ggtfver.vercel.app/seance) to play a starter app together, or [/studio](https://ggtfver.vercel.app/studio) to build one.
+
 GGTF is a two-way, encrypted data link that works only through sound. Two browsers pair, agree on keys and chat using a speaker and a microphone. No Wi-Fi, Bluetooth or cable is involved.
 
 Built for **Kiroween 2026**, Frankenstein category. It stitches together:

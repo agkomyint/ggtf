@@ -11,9 +11,9 @@ Each phase ends with something that works on its own, so the project is submitta
   - [x] 1.4 Add `.gitignore` for build output only (never `.kiro/`) *(no `.editorconfig`)*
   - [x] 1.5 Write README with required tools, versions and setup steps
   - _Requirements: 11.1, 11.2, 11.3_
-- [ ] 2. Update steering
-  - [ ] 2.1 Add `.kiro/steering/tech.md` (stack, commands, coding conventions)
-  - [ ] 2.2 Add `.kiro/steering/structure.md` (folder layout and where code belongs)
+- [x] 2. Update steering
+  - [x] 2.1 Add `.kiro/steering/tech.md` (stack, commands, coding conventions)
+  - [x] 2.2 Add `.kiro/steering/structure.md` (folder layout and where code belongs)
   - _Requirements: 11.1_
 
 ## Phase 1: Modem core in Rust
@@ -72,8 +72,8 @@ Each phase ends with something that works on its own, so the project is submitta
   - [x] 13.2 Live spectrogram with band markers, status panel with metrics, event log
   - [x] 13.3 Error states: mic denied, insecure origin, sample-rate fallback, decode failures, session end reasons
   - _Requirements: 6.1–6.3, 7.1, 7.2_
-- [ ] 14. Checkpoint: two tabs on one laptop complete a secure half-duplex chat over the speaker and mic
-  - *Verified in headless Chrome over a virtual audio cable (`scripts/browser-loopback.ts`) and in simulation. Not yet verified over a real speaker and mic.*
+- [x] 14. Checkpoint: two tabs on one laptop complete a secure half-duplex chat over the speaker and mic
+  - *Verified over a real speaker and mic (two Chrome profiles on one laptop, `scripts/seance-check.ts --air`) and by the developer on separate devices.*
 
 ## Phase 3: Benchmarks and baseline
 
@@ -127,7 +127,11 @@ Each phase ends with something that works on its own, so the project is submitta
 
 ## Phase 6: Submission
 
-- [ ] 27. Deploy the web app to an HTTPS host and test the deployed URL on two devices
+- [x] 27. Deploy the web app to an HTTPS host and test the deployed URL on two devices *(https://ggtfver.vercel.app/)*
 - [x] 28. Finish README: features, architecture diagram, benchmark table, how to test with two tabs
-- [ ] 29. Write the "How Kiro was used" write-up (specs, steering, hooks, MCP, PBT)
+- [x] 29. Write the "How Kiro was used" write-up (specs, steering, hooks, MCP, PBT) *(`docs/devpost.md`)*
 - [ ] 30. Record the demo video (under 3 minutes) and fill in the Devpost form
+
+## Phase 7: Séance OS
+
+- [x] 31. App platform over sound: see `.kiro/specs/seance-os/` (link upgrades, GGTP, GhostDB, Studio, OS, starters)

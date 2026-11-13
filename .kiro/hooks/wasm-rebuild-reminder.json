@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Remind to rebuild WASM and starters",
+      "trigger": "PostFileSave",
+      "description": "Reminds the agent that the committed WASM and starter bundles must be rebuilt after source changes.",
+      "matcher": "(crates[\\\\/].*\\.rs|apps[\\\\/]web[\\\\/]lib[\\\\/]seance[\\\\/]templates\\.ts)$",
+      "action": {
+        "type": "agent",
+        "prompt": "A Rust crate or the spirit templates changed. Before finishing: run `bun run build:wasm` if Rust changed (the committed apps/web/public/wasm must match the source), and run `bun scripts/pack-starters.ts` if templates.ts changed, so the preloaded starter spirits match."
+      }
+    }
+  ]
+}
