@@ -2,11 +2,17 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const __wbg_wasmstation_free: (a: number, b: number) => void;
-export const bench_run: (a: number, b: number, c: number, d: number, e: number) => [number, number];
-export const bench_sample: (a: number, b: number, c: number, d: number) => [number, number];
+export const bands_json: () => [number, number];
+export const beam_round_seconds: (a: number, b: number, c: number) => number;
+export const bench_run: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
+export const bench_sample: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+export const ml_available: () => number;
 export const profiles_json: () => [number, number];
 export const scenarios_json: () => [number, number];
 export const wasmstation_accept: (a: number, b: number) => number;
+export const wasmstation_beam_start: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+export const wasmstation_beam_start_bytes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
+export const wasmstation_beam_stop: (a: number) => void;
 export const wasmstation_call: (a: number, b: number) => void;
 export const wasmstation_confirm: (a: number, b: number) => void;
 export const wasmstation_decline: (a: number) => void;
@@ -18,6 +24,8 @@ export const wasmstation_push_samples: (a: number, b: number, c: number, d: numb
 export const wasmstation_reject: (a: number, b: number) => void;
 export const wasmstation_send_text: (a: number, b: number, c: number, d: number) => number;
 export const wasmstation_set_answer: (a: number, b: number) => void;
+export const wasmstation_set_band: (a: number, b: number) => void;
+export const wasmstation_set_ml: (a: number, b: number) => number;
 export const wasmstation_stats: (a: number) => [number, number];
 export const wasmstation_take_events: (a: number) => [number, number];
 export const wasmstation_tick: (a: number, b: number) => void;

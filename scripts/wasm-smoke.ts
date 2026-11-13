@@ -2,7 +2,7 @@
 // using the same JS API the browser worker uses. Run with: bun scripts/wasm-smoke.ts
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { initSync, WasmStation, bench_run, scenarios_json } from "../apps/web/public/wasm/ggtf_wasm.js";
+import { initSync, WasmStation, bench_run, scenarios_json, ml_available } from "../apps/web/public/wasm/ggtf_wasm.js";
 
 initSync({ module: readFileSync(join(import.meta.dir, "../apps/web/public/wasm/ggtf_wasm_bg.wasm")) });
 
@@ -63,7 +63,24 @@ console.log("received:", evB.find((e) => e.type === "msg_rx")?.text);
 console.log("delivered:", evA.some((e) => e.type === "msg_status" && e.status === "delivered"));
 console.log("profile:", evA.find((e) => e.type === "trained")?.profile, `simulated ${(now / 1000).toFixed(1)} s`);
 
+a.hangup(now);
+until(30_000, () => state(evA) === "idle" && state(evB) === "idle");
+
+// Beam: A broadcasts on the high band with ML decoding on B; no pairing.
+console.log("ML model bundled:", ml_available(), "| B ML active:", b.set_ml(true));
+const beamText = "WIFI:T:WPA;S:Haunted Manor;P:trick-or-treat;;";
+const beamId = a.beam_start(beamText, 1, 2, 3);
+if (beamId < 0) throw new Error("beam refused");
+if (!until(60_000, () => evB.some((e) => e.type === "beam_rx"))) throw new Error("beam not received");
+const got = evB.find((e) => e.type === "beam_rx");
+console.log("beam received on high band:", got?.text === beamText, JSON.stringify(got?.text));
+if (got?.text !== beamText) throw new Error("beam text mismatch");
+const rx = evB.find((e) => e.type === "rx_frame" && e.kind === "BEAM") as any;
+console.log("beam frame band:", rx?.band);
+
 const scen = JSON.parse(scenarios_json());
-const r = JSON.parse(bench_run(scen.findIndex((s: { key: string }) => s.key === "cafe"), 1, 5, 32, 42));
-console.log("bench cafe/specter:", `${r.ok}/${r.frames}`);
+const idx = scen.findIndex((s: { key: string }) => s.key === "beeps5");
+const c = JSON.parse(bench_run(idx, 2, 1, false, 10, 32, 42));
+const m = JSON.parse(bench_run(idx, 2, 1, true, 10, 32, 42));
+console.log(`bench beeps/banshee: classic ${c.ok}/${c.frames}, ml ${m.ok}/${m.frames} (decoder=${m.decoder})`);
 console.log("WASM smoke test passed");

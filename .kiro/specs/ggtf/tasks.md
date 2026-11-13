@@ -93,21 +93,29 @@ Each phase ends with something that works on its own, so the project is submitta
 
 ## Phase 4: ML receiver
 
-- [ ] 19. Training pipeline
-  - [ ] 19.1 `generate.py`: synthetic labeled shards using the Rust encoder, simulator and features
-  - [ ] 19.2 `train.py`: small CNN symbol decoder with separate validation noise
-  - [ ] 19.3 `export.py`: ONNX export and parity check
+- [x] 19. Training pipeline
+  - [x] 19.1 Synthetic labeled data from the Rust encoder, simulator and features *(Rust example `ml_data` instead of `generate.py`)*
+  - [x] 19.2 `ml/train.py`: small MLP symbol decoder with a separately seeded validation set *(MLP, not CNN)*
+  - [x] 19.3 Export: `symbol_mlp.bin` for Rust + ONNX copy; parity checked by `ml_eval`
   - [ ] 19.4* `pytest` + `hypothesis` tests for feature parity and export parity (property 11)
   - _Requirements: 9.1–9.3_
-- [ ] 20. Browser inference
-  - [ ] 20.1 Load `onnxruntime-web` and the model in the link worker; classic/ML switch in the UI
-  - [ ] 20.2 Map model probabilities to RS erasures
-  - [ ] 20.3 Fallback to the classic decoder on load failure or if too slow
+- [x] 20. Browser inference
+  - [x] 20.1 Model embedded in the WASM and run by Rust in the link worker *(no onnxruntime-web)*; classic/ML switch in the UI
+  - [x] 20.2 Map model probabilities to RS erasures
+  - [x] 20.3 Fallback to classic when no model is bundled, and per frame when the ML decode fails its CRC
   - _Requirements: 9.3–9.5_
-- [ ] 21. Add the ML decoder to the benchmark; validate on real captures
+- [ ] 21. Add the ML decoder to the benchmark; validate on real captures *(benchmark done; real captures not yet)*
   - _Requirements: 9.6, 10.2_
-- [ ] 22. Checkpoint: ML decoder beats classic in noisy scenarios without losing in clean; model committed
+- [x] 22. Checkpoint: ML decoder beats classic in noisy scenarios without losing in clean; model committed
   - _Requirements: 9.6, 11.4_
+
+## Phase 4b: Bands, comfort and beam (added in round 2)
+
+- [x] B1. Low / mid / high bands; one receiver per band; answerer adopts the caller's band
+- [x] B2. Output volume control; high band as the quiet option
+- [x] B3. Beam mode (`/beam`, "Haunted QR"): chunked carousel broadcast, message CRC, Wi-Fi and link helpers
+- [x] B4. Glare: both sides pressing Call resolves by station id
+- [x] B5. Harder benchmark rooms (21 rooms in 3 tiers, speaker roll-off) and classic-vs-ML tables per profile and band
 
 ## Phase 5: Full-duplex (stretch)
 

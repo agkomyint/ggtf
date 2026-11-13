@@ -8,6 +8,8 @@ import { join } from "node:path";
 
 const base = process.argv.find((a) => a.startsWith("http")) ?? "http://localhost:3210";
 const visible = process.argv.includes("--visible");
+const bandArg = (process.argv.find((a) => a.startsWith("--band=")) ?? "--band=mid").slice(7);
+const BAND = { low: { idx: 0, lo: 500, hi: 4100, tab: "Low" }, mid: { idx: 1, lo: 1500, hi: 5100, tab: "Mid" }, high: { idx: 2, lo: 14500, hi: 18100, tab: "High" } }[bandArg] ?? { idx: 1, lo: 1500, hi: 5100, tab: "Mid" };
 const port = 9341;
 const proc = spawn("C:/Program Files/Google/Chrome/Application/chrome.exe", [
   ...(visible ? [] : ["--headless=new"]),
@@ -36,7 +38,7 @@ const measure = `(() => {
   const g = window.__ggtf; const a = g.inMeter;
   const f = new Float32Array(a.frequencyBinCount); a.getFloatFrequencyData(f);
   const hz = a.context.sampleRate / 2 / f.length; let band = -200, out = -200;
-  for (let i = 0; i < f.length; i++) { const v = f[i]; const fr = i * hz; if (fr >= 1500 && fr <= 4800) band = Math.max(band, v); else if (fr > 300) out = Math.max(out, v); }
+  for (let i = 0; i < f.length; i++) { const v = f[i]; const fr = i * hz; if (fr >= ${BAND.lo} && fr <= ${BAND.hi}) band = Math.max(band, v); else if (fr > 300) out = Math.max(out, v); }
   const t = new Float32Array(a.fftSize); a.getFloatTimeDomainData(t); let pk = 0; for (const x of t) pk = Math.max(pk, Math.abs(x));
   const o = new Float32Array(g.outMeter.fftSize); g.outMeter.getFloatTimeDomainData(o); let opk = 0; for (const x of o) opk = Math.max(opk, Math.abs(x));
   return { band: Math.round(band), other: Math.round(out), micPeak: +pk.toFixed(4), spkPeak: +opk.toFixed(3) };
@@ -63,6 +65,9 @@ const quiet = await sample("silence", 1500);
 await click("Test speaker");
 const beep = await sample("during test beep", 900);
 await sleep(800);
+await ev(`[...document.querySelectorAll('[role=tab]')].find(t => t.textContent.trim() === ${JSON.stringify(BAND.tab)})?.click()`);
+await sleep(300);
+console.log("band:", bandArg, `${BAND.lo}-${BAND.hi} Hz`);
 await click("Call");
 const call = await sample("during CALL", 1500);
 await click("Hang up");

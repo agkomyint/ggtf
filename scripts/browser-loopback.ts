@@ -120,6 +120,36 @@ try {
   console.log("      own echoes A ignored:", own);
   await evaluate(`A.worker.postMessage({ type: 'hangup' })`);
   step("hang-up reaches both", await waitFor(`${lastState("A")} === 'idle' && ${lastState("B")} === 'idle'`, 60000));
+  await evaluate(`B.worker.postMessage({ type: 'ml', on: true }); A.worker.postMessage({ type: 'beam-start', text: 'https://github.com/agkomyint/ggtf', profile: 1, band: 2, rounds: 3 })`);
+  step("beam on high band reaches B (ML on, no pairing)", await waitFor(`B.events.some(e => e.type === 'beam_rx' && e.text === 'https://github.com/agkomyint/ggtf')`, 60000));
+  step("B stayed idle during the beam", (await evaluate<string>(lastState("B"))) === "idle");
+  const img = await evaluate<string>(`(async () => {
+    const c = new OffscreenCanvas(72, 72); const g = c.getContext('2d');
+    const grad = g.createLinearGradient(0, 0, 72, 72); grad.addColorStop(0, '#6dff9c'); grad.addColorStop(1, '#5b2a86');
+    g.fillStyle = grad; g.fillRect(0, 0, 72, 72); g.fillStyle = '#050a07'; g.beginPath(); g.arc(26, 30, 7, 0, 7); g.arc(46, 30, 7, 0, 7); g.fill();
+    const blob = await c.convertToBlob({ type: 'image/webp', quality: 0.55 });
+    const raw = new Uint8Array(await blob.arrayBuffer());
+    const bytes = new Uint8Array(6 + raw.length); bytes.set([0, 0x47, 0x49, blob.type === 'image/webp' ? 1 : 2, 72, 72]); bytes.set(raw, 6);
+    window.__imgBytes = bytes; window.__imgT0 = performance.now();
+    A.worker.postMessage({ type: 'beam-start', bytes, profile: 3, band: 1, rounds: 0, chunk: 196 });
+    return JSON.stringify({ bytes: bytes.length, type: blob.type });
+  })()`);
+  console.log("      image to beam:", img);
+  const gotImg = await waitFor(`B.events.some(e => e.type === 'beam_rx' && e.bytes === window.__imgBytes.length)`, 120000);
+  step("image arrives at B (Turbo, 196-byte chunks)", gotImg);
+  if (gotImg) {
+    const check = await evaluate<string>(`(async () => {
+      const e = B.events.find(e => e.type === 'beam_rx' && e.bytes === window.__imgBytes.length);
+      const s = atob(e.b64); const b = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
+      const same = b.length === window.__imgBytes.length && b.every((v, i) => v === window.__imgBytes[i]);
+      const bmp = await createImageBitmap(new Blob([b.slice(6)], { type: b[3] === 1 ? 'image/webp' : 'image/jpeg' }));
+      const sec = (performance.now() - window.__imgT0) / 1000;
+      A.worker.postMessage({ type: 'beam-stop' });
+      return JSON.stringify({ same, w: bmp.width, h: bmp.height, sec: +sec.toFixed(1), bps: +(b.length / sec).toFixed(1) });
+    })()`);
+    console.log("      received image:", check);
+    step("image bytes identical and decodable", JSON.parse(check).same && JSON.parse(check).w === 72);
+  }
   const errs = await evaluate<string>(`JSON.stringify([...A.events, ...B.events].filter(e => e.type === 'error'))`);
   step("no worker errors", errs === "[]");
 } catch (e) {

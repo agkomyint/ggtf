@@ -5,13 +5,12 @@
 
 use crate::dsp;
 use crate::frame::{Frame, HEADER_CW_LEN};
-use crate::profile::{Profile, ProfileId, WRAITH};
+use crate::ml::{self, Decoder};
+use crate::profile::{Band, Profile, ProfileId, WRAITH};
 use crate::SR;
 use std::f64::consts::PI;
 
 pub const PREAMBLE_LEN: usize = 4800;
-pub const PREAMBLE_F0: f32 = 1500.0;
-pub const PREAMBLE_F1: f32 = 4800.0;
 pub const PREAMBLE_GAP: usize = 480;
 pub const MARKER_SYMBOLS: usize = 2;
 pub const TAIL: usize = 960;
@@ -19,12 +18,14 @@ pub const AMP: f32 = 0.7;
 /// Power ratio (best tone / runner-up) below which a nibble counts as a suspect for RS erasures.
 pub const SUSPECT_RATIO: f32 = 6.0;
 
-pub fn preamble() -> Vec<f32> {
-    dsp::chirp(PREAMBLE_LEN, PREAMBLE_F0, PREAMBLE_F1, SR, AMP)
+pub fn preamble(band: Band) -> Vec<f32> {
+    let (f0, f1) = band.chirp();
+    dsp::chirp(PREAMBLE_LEN, f0, f1, SR, AMP)
 }
 
+/// Marker tones sit 4 tones (200 Hz) apart so the four profiles are easy to tell apart.
 pub fn marker_tone(id: ProfileId) -> usize {
-    2 + 6 * id as usize
+    1 + 4 * id as usize
 }
 
 pub fn marker_offset() -> usize {
@@ -39,11 +40,18 @@ pub fn header_samples(p: &Profile) -> usize {
     p.symbols_for_bytes(HEADER_CW_LEN) * p.symbol_len()
 }
 
+/// Reed-Solomon parity for a payload: the profile's base parity per 96 bytes of payload,
+/// so long frames keep the same protection per byte. Capped so the codeword fits in 255 bytes.
+pub fn payload_parity(p: &Profile, payload_len: usize) -> usize {
+    let scaled = p.parity * payload_len.max(1).div_ceil(96);
+    scaled.min(255 - 4 - payload_len.min(250)).max(2)
+}
+
 pub fn payload_cw_len(p: &Profile, payload_len: usize) -> usize {
     if payload_len == 0 {
         0
     } else {
-        payload_len + 4 + p.parity
+        payload_len + 4 + payload_parity(p, payload_len)
     }
 }
 
@@ -74,7 +82,7 @@ fn bytes_to_symbols(bytes: &[u8], groups: usize) -> Vec<Vec<u8>> {
 
 /// Writes symbols into `out` starting at `at`; returns where the next symbol starts.
 /// Each tone extends `ramp` samples into the next symbol and crossfades with it.
-fn render(p: &Profile, symbols: &[Vec<u8>], out: &mut Vec<f32>, at: usize) -> usize {
+fn render(p: &Profile, band: Band, symbols: &[Vec<u8>], out: &mut Vec<f32>, at: usize) -> usize {
     let l = p.symbol_len();
     let r = p.ramp();
     let end = at + symbols.len() * l;
@@ -85,7 +93,7 @@ fn render(p: &Profile, symbols: &[Vec<u8>], out: &mut Vec<f32>, at: usize) -> us
     for (k, sym) in symbols.iter().enumerate() {
         let s0 = at + k * l;
         for (g, &tone) in sym.iter().enumerate() {
-            let w = 2.0 * PI * p.tone_hz(g, tone as usize) as f64 / SR as f64;
+            let w = 2.0 * PI * p.tone_hz(band, g, tone as usize) as f64 / SR as f64;
             for n in 0..(l + r) {
                 let env = if n < r {
                     0.5 - 0.5 * (PI * n as f64 / r as f64).cos()
@@ -101,15 +109,15 @@ fn render(p: &Profile, symbols: &[Vec<u8>], out: &mut Vec<f32>, at: usize) -> us
     end
 }
 
-pub fn encode_frame(frame: &Frame, id: ProfileId) -> Vec<f32> {
+pub fn encode_frame(frame: &Frame, id: ProfileId, band: Band) -> Vec<f32> {
     let p = id.profile();
-    let mut out = preamble();
+    let mut out = preamble(band);
     out.resize(marker_offset(), 0.0);
     let mk = marker_tone(id) as u8;
-    let at = render(&WRAITH, &vec![vec![mk; WRAITH.groups]; MARKER_SYMBOLS], &mut out, marker_offset());
-    let at = render(p, &bytes_to_symbols(&frame.header_codeword(), p.groups), &mut out, at);
-    let at = match frame.payload_codeword(p.parity) {
-        Some(cw) => render(p, &bytes_to_symbols(&cw, p.groups), &mut out, at),
+    let at = render(&WRAITH, band, &vec![vec![mk; WRAITH.groups]; MARKER_SYMBOLS], &mut out, marker_offset());
+    let at = render(p, band, &bytes_to_symbols(&frame.header_codeword(), p.groups), &mut out, at);
+    let at = match frame.payload_codeword(payload_parity(p, frame.payload.len())) {
+        Some(cw) => render(p, band, &bytes_to_symbols(&cw, p.groups), &mut out, at),
         None => at,
     };
     out.resize(at + p.ramp() + TAIL, 0.0);
@@ -134,21 +142,21 @@ impl Soft {
     }
 }
 
-/// Classic decoder: Goertzel power for each tone, pick the strongest per group.
-/// `x` starts at the first symbol and must hold all symbols.
-pub fn demod_bytes(p: &Profile, x: &[f32], n_bytes: usize) -> Soft {
+/// Decodes `n_bytes` from symbols. `x` starts at the first symbol and must hold all symbols.
+/// Classic: Goertzel power for each tone, pick the loudest per group.
+/// Ml: the embedded model reads richer features (see `ml.rs`); falls back to classic without a model.
+pub fn demod_bytes(p: &Profile, band: Band, x: &[f32], n_bytes: usize, decoder: Decoder) -> Soft {
     let nsym = p.symbols_for_bytes(n_bytes);
-    let l = p.symbol_len();
-    let off = p.analysis_offset();
+    let full = ml::full_powers(p, band, x, nsym);
+    let model = if decoder == Decoder::Ml { ml::model() } else { None };
     let mut nib = Vec::with_capacity(nsym * p.groups);
     let mut nconf = Vec::with_capacity(nsym * p.groups);
     let mut margin = 0.0f64;
     for k in 0..nsym {
-        let win = &x[k * l + off..k * l + off + p.window];
         for g in 0..p.groups {
+            let pw = &full[k][g];
             let (mut b1, mut b2, mut bi, mut total) = (-1.0f32, 0.0f32, 0usize, 0.0f32);
-            for t in 0..p.tones {
-                let e = dsp::tone_power(win, p.tone_hz(g, t), SR);
+            for (t, &e) in pw.iter().enumerate() {
                 total += e;
                 if e > b1 {
                     b2 = b1.max(0.0);
@@ -160,8 +168,30 @@ pub fn demod_bytes(p: &Profile, x: &[f32], n_bytes: usize) -> Soft {
             }
             let others = ((total - b1) / (p.tones - 1) as f32).max(1e-12);
             margin += (b1.max(1e-12) / others) as f64;
-            nib.push(bi as u8);
-            nconf.push(b1 / b2.max(1e-12));
+            match model {
+                Some(m) => {
+                    let probs = m.predict(&ml::features(p, band, x, &full, k, g));
+                    let (mut q1, mut q2, mut qi) = (-1.0f32, 0.0f32, 0usize);
+                    for (t, &v) in probs.iter().enumerate() {
+                        if v > q1 {
+                            q2 = q1.max(0.0);
+                            q1 = v;
+                            qi = t;
+                        } else if v > q2 {
+                            q2 = v;
+                        }
+                    }
+                    nib.push(qi as u8);
+                    // Probability ratios are smaller than power ratios for the same certainty;
+                    // squaring puts them on the scale SUSPECT_RATIO was tuned for.
+                    let r = q1 / q2.max(1e-6);
+                    nconf.push(r * r);
+                }
+                None => {
+                    nib.push(bi as u8);
+                    nconf.push(b1 / b2.max(1e-12));
+                }
+            }
         }
     }
     let mut bytes = Vec::with_capacity(n_bytes);
@@ -174,21 +204,26 @@ pub fn demod_bytes(p: &Profile, x: &[f32], n_bytes: usize) -> Soft {
     Soft { bytes, conf, snr_db: (10.0 * (margin / n).log10()) as f32 }
 }
 
+/// True nibbles for a codeword, in transmission order (used to label ML training data).
+pub fn codeword_nibbles(bytes: &[u8], groups: usize) -> Vec<u8> {
+    bytes_to_symbols(bytes, groups).concat()
+}
+
 /// Reads the two marker symbols and returns the profile they announce.
-pub fn decode_marker(x: &[f32]) -> Option<ProfileId> {
+pub fn decode_marker(x: &[f32], band: Band) -> Option<ProfileId> {
     let p = &WRAITH;
     let l = p.symbol_len();
     let off = p.analysis_offset();
-    let mut score = [0f32; 3];
+    let mut score = [0f32; 4];
     for s in 0..MARKER_SYMBOLS {
         let win = &x[s * l + off..s * l + off + p.window];
         for g in 0..p.groups {
             for id in ProfileId::ALL {
-                score[id as usize] += dsp::tone_power(win, p.tone_hz(g, marker_tone(id)), SR);
+                score[id as usize] += dsp::tone_power(win, p.tone_hz(band, g, marker_tone(id)), SR);
             }
         }
     }
-    let mut idx: Vec<usize> = (0..3).collect();
+    let mut idx: Vec<usize> = (0..4).collect();
     idx.sort_by(|&a, &b| score[b].total_cmp(&score[a]));
     if score[idx[0]] > 2.0 * score[idx[1]].max(1e-12) {
         ProfileId::from_u8(idx[0] as u8)

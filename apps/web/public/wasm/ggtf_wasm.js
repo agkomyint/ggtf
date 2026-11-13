@@ -21,6 +21,45 @@ export class WasmStation {
         return ret !== 0;
     }
     /**
+     * Starts broadcasting `text`. `rounds` 0 = until stopped. Returns the beam id, or -1.
+     * @param {string} text
+     * @param {number} profile_id
+     * @param {number} band_id
+     * @param {number} rounds
+     * @returns {number}
+     */
+    beam_start(text, profile_id, band_id, rounds) {
+        const val2 = +profile_id;
+        const val3 = +band_id;
+        const val4 = +rounds;
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmstation_beam_start(this.__wbg_ptr, ptr0, len0, val2, val3, val4);
+        return ret;
+    }
+    /**
+     * Broadcasts raw bytes (used for images). `chunk` is the bytes per frame (16 to 196).
+     * @param {Uint8Array | number[]} data
+     * @param {number} profile_id
+     * @param {number} band_id
+     * @param {number} rounds
+     * @param {number} chunk
+     * @returns {number}
+     */
+    beam_start_bytes(data, profile_id, band_id, rounds, chunk) {
+        const val2 = +profile_id;
+        const val3 = +band_id;
+        const val4 = +rounds;
+        const val5 = +chunk;
+        const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmstation_beam_start_bytes(this.__wbg_ptr, ptr0, len0, val2, val3, val4, val5);
+        return ret;
+    }
+    beam_stop() {
+        wasm.wasmstation_beam_stop(this.__wbg_ptr);
+    }
+    /**
      * @param {number} now
      */
     call(now) {
@@ -107,6 +146,22 @@ export class WasmStation {
         wasm.wasmstation_set_answer(this.__wbg_ptr, on);
     }
     /**
+     * Band for outgoing calls and beams: 0 low, 1 mid, 2 high.
+     * @param {number} b
+     */
+    set_band(b) {
+        wasm.wasmstation_set_band(this.__wbg_ptr, b);
+    }
+    /**
+     * Turns the ML symbol decoder on or off. Returns whether ML is now active.
+     * @param {boolean} on
+     * @returns {boolean}
+     */
+    set_ml(on) {
+        const ret = wasm.wasmstation_set_ml(this.__wbg_ptr, on);
+        return ret !== 0;
+    }
+    /**
      * @returns {string}
      */
     stats() {
@@ -152,18 +207,48 @@ export class WasmStation {
 if (Symbol.dispose) WasmStation.prototype[Symbol.dispose] = WasmStation.prototype.free;
 
 /**
+ * @returns {string}
+ */
+export function bands_json() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.bands_json();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * Seconds of airtime for one beam round, computed by the real modem.
+ * @param {number} bytes
+ * @param {number} profile_id
+ * @param {number} chunk
+ * @returns {number}
+ */
+export function beam_round_seconds(bytes, profile_id, chunk) {
+    const ret = wasm.beam_round_seconds(bytes, profile_id, chunk);
+    return ret;
+}
+
+/**
  * @param {number} scenario_index
- * @param {number} profile
+ * @param {number} profile_id
+ * @param {number} band_id
+ * @param {boolean} ml_on
  * @param {number} frames
  * @param {number} payload_len
  * @param {number} seed
  * @returns {string}
  */
-export function bench_run(scenario_index, profile, frames, payload_len, seed) {
+export function bench_run(scenario_index, profile_id, band_id, ml_on, frames, payload_len, seed) {
     let deferred1_0;
     let deferred1_1;
     try {
-        const ret = wasm.bench_run(scenario_index, profile, frames, payload_len, seed);
+        const ret = wasm.bench_run(scenario_index, profile_id, band_id, ml_on, frames, payload_len, seed);
         deferred1_0 = ret[0];
         deferred1_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);
@@ -175,16 +260,25 @@ export function bench_run(scenario_index, profile, frames, payload_len, seed) {
 /**
  * One degraded test frame as audio, for the "listen" button in the lab.
  * @param {number} scenario_index
- * @param {number} profile
+ * @param {number} profile_id
+ * @param {number} band_id
  * @param {number} payload_len
  * @param {number} seed
  * @returns {Float32Array}
  */
-export function bench_sample(scenario_index, profile, payload_len, seed) {
-    const ret = wasm.bench_sample(scenario_index, profile, payload_len, seed);
+export function bench_sample(scenario_index, profile_id, band_id, payload_len, seed) {
+    const ret = wasm.bench_sample(scenario_index, profile_id, band_id, payload_len, seed);
     var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v1;
+}
+
+/**
+ * @returns {boolean}
+ */
+export function ml_available() {
+    const ret = wasm.ml_available();
+    return ret !== 0;
 }
 
 /**
@@ -383,6 +477,13 @@ function handleError(f, args) {
 
 function isLikeNone(x) {
     return x === undefined || x === null;
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
 }
 
 function passArrayF32ToWasm0(arg, malloc) {

@@ -2,12 +2,14 @@
 
 import { useEffect, useRef } from "react";
 
-const MAX_HZ = 8000;
+const MAX_HZ = 20000;
 const BANDS = [
-  { lo: 1500, hi: 4800, label: "GGTF band" },
+  { lo: 500, hi: 4100, label: "low" },
+  { lo: 1500, hi: 5100, label: "mid" },
+  { lo: 14500, hi: 18100, label: "high" },
 ];
 
-/** Scrolling waterfall of the microphone input, 0 to 8 kHz. */
+/** Scrolling waterfall of the microphone input, 0 to 20 kHz, with the three GGTF bands marked. */
 export function Spectrogram({ analyser, active }: { analyser: React.RefObject<AnalyserNode | null>; active: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -88,8 +90,10 @@ export function Spectrogram({ analyser, active }: { analyser: React.RefObject<An
     <div className="relative overflow-hidden rounded-lg border border-border bg-[#050a07] scanlines">
       <canvas ref={canvasRef} className="block h-56 w-full" aria-label="Live spectrogram of the microphone input" role="img" />
       <div className="pointer-events-none absolute inset-y-0 left-2 flex flex-col justify-between py-1 text-[10px] text-muted-foreground font-mono">
-        <span>8 kHz</span>
-        <span>4 kHz</span>
+        <span>20 kHz</span>
+        <span>15</span>
+        <span>10</span>
+        <span>5</span>
         <span>0</span>
       </div>
       {!active && (

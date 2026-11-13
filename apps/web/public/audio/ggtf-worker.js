@@ -1,7 +1,7 @@
 // Link worker: runs the Rust/WASM station off the main thread.
 // Audio arrives from the AudioWorklet over a MessagePort; UI commands and events use postMessage.
 
-import init, { WasmStation, profiles_json, scenarios_json, bench_run, bench_sample } from "/wasm/ggtf_wasm.js";
+import init, { WasmStation, profiles_json, bands_json, scenarios_json, bench_run, bench_sample, ml_available } from "/wasm/ggtf_wasm.js";
 
 let ready = null;
 let station = null;
@@ -60,10 +60,12 @@ self.onmessage = async (e) => {
         await ensureReady();
         station = new WasmStation(m.id, m.seed);
         station.set_answer(!!m.answer);
+        if (m.band !== undefined) station.set_band(m.band);
+        if (m.ml !== undefined) station.set_ml(!!m.ml);
         audioPort = m.port;
         audioPort.onmessage = onAudio;
         setInterval(pump, 40);
-        self.postMessage({ type: "ready", profiles: JSON.parse(profiles_json()) });
+        self.postMessage({ type: "ready", profiles: JSON.parse(profiles_json()), bands: JSON.parse(bands_json()), mlAvailable: ml_available() });
         break;
       case "call":
         station?.call(now());
@@ -76,6 +78,24 @@ self.onmessage = async (e) => {
         break;
       case "decline":
         station?.decline();
+        break;
+      case "band":
+        station?.set_band(m.band);
+        break;
+      case "ml": {
+        const on = station ? station.set_ml(!!m.on) : false;
+        self.postMessage({ type: "ml", on });
+        break;
+      }
+      case "beam-start": {
+        // Text and images both travel as bytes; `chunk` is bytes per frame.
+        const bytes = m.bytes instanceof Uint8Array ? m.bytes : new TextEncoder().encode(m.text ?? "");
+        const id = station ? station.beam_start_bytes(bytes, m.profile, m.band, m.rounds ?? 0, m.chunk ?? 48) : -1;
+        self.postMessage({ type: "beam-started", id, bytes: bytes.length });
+        break;
+      }
+      case "beam-stop":
+        station?.beam_stop();
         break;
       case "confirm":
         station?.confirm(now());
@@ -93,17 +113,17 @@ self.onmessage = async (e) => {
       }
       case "bench-init":
         await ensureReady();
-        self.postMessage({ type: "bench-ready", scenarios: JSON.parse(scenarios_json()), profiles: JSON.parse(profiles_json()) });
+        self.postMessage({ type: "bench-ready", scenarios: JSON.parse(scenarios_json()), profiles: JSON.parse(profiles_json()), bands: JSON.parse(bands_json()), mlAvailable: ml_available() });
         break;
       case "bench-run": {
         await ensureReady();
-        const result = JSON.parse(bench_run(m.scenario, m.profile, m.frames, m.payload, m.seed));
+        const result = JSON.parse(bench_run(m.scenario, m.profile, m.band ?? 1, !!m.ml, m.frames, m.payload, m.seed));
         self.postMessage({ type: "bench-result", ref: m.ref, result });
         break;
       }
       case "bench-sample": {
         await ensureReady();
-        const samples = bench_sample(m.scenario, m.profile, m.payload, m.seed);
+        const samples = bench_sample(m.scenario, m.profile, m.band ?? 1, m.payload, m.seed);
         self.postMessage({ type: "bench-sample", ref: m.ref, samples }, [samples.buffer]);
         break;
       }

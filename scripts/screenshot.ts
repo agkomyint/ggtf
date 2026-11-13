@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 const base = process.argv[2] ?? "http://localhost:3210";
 const out = process.argv[3] ?? join(tmpdir(), "ggtf-shots");
+const page = process.argv[4] ?? "/link";
 const port = 9335;
 const proc = spawn("C:/Program Files/Google/Chrome/Application/chrome.exe", [
   "--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${mkdtempSync(join(tmpdir(), "ggtf-shot-"))}`,
@@ -32,11 +33,13 @@ const shot = async (name: string) => {
 };
 await send("Page.enable");
 await send("Emulation.setDeviceMetricsOverride", { width: 1400, height: 1700, deviceScaleFactor: 1, mobile: false });
-await send("Page.navigate", { url: `${base}/link` });
+await send("Page.navigate", { url: `${base}${page}` });
 await sleep(3000);
 await shot("1-before.png");
 await send("Runtime.evaluate", { expression: `[...document.querySelectorAll('button')].find(b => b.textContent.includes('Open the'))?.click()` });
 await sleep(4000);
+// __preShot: optional JS to run before the second screenshot (e.g. to set up a scene).
+if (process.argv[5]) { await send("Runtime.evaluate", { expression: process.argv[5], awaitPromise: true }); await sleep(2500); }
 await shot("2-after-open.png");
 ws.close();
 proc.kill();

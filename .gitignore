@@ -21,3 +21,7 @@ Thumbs.db
 
 # NOTE: never ignore .kiro/ (the hackathon requires it in the repo).
 # apps/web/public/wasm/ is committed on purpose so the app runs without Rust.
+
+# ML training data (regenerate with: cargo run --release -p ggtf-core --example ml_data)
+/ml/data/
+__pycache__/

@@ -2,8 +2,9 @@
 
 use crate::dsp::{BandPass, Correlator};
 use crate::frame::{self, Frame, Header, HEADER_CW_LEN};
+use crate::ml::Decoder;
 use crate::modem;
-use crate::profile::ProfileId;
+use crate::profile::{Band, ProfileId};
 use crate::SR;
 
 pub const CORR_NFFT: usize = 8192;
@@ -14,7 +15,7 @@ const PEAK_GUARD: usize = 480;
 #[derive(Clone, Debug)]
 pub enum RxEvent {
     Detected { at: u64, score: f32 },
-    Frame { frame: Frame, profile: ProfileId, snr_db: f32, score: f32, at: u64 },
+    Frame { frame: Frame, profile: ProfileId, band: Band, snr_db: f32, score: f32, at: u64 },
     Failed { stage: &'static str, at: u64 },
 }
 
@@ -38,6 +39,7 @@ enum State {
 }
 
 pub struct Receiver {
+    pub band: Band,
     filter: BandPass,
     corr: Correlator,
     buf: Vec<f32>,
@@ -47,25 +49,29 @@ pub struct Receiver {
     state: State,
     pub threshold: f32,
     pub stats: RxStats,
+    pub decoder: Decoder,
 }
 
 impl Default for Receiver {
     fn default() -> Self {
-        Self::new()
+        Self::new(Band::Mid)
     }
 }
 
 impl Receiver {
-    pub fn new() -> Self {
+    pub fn new(band: Band) -> Self {
+        let (lo, hi) = band.filter();
         Receiver {
-            filter: BandPass::new(1100.0, 5600.0, SR),
-            corr: Correlator::new(&modem::preamble(), CORR_NFFT),
+            band,
+            filter: BandPass::new(lo, hi, SR),
+            corr: Correlator::new(&modem::preamble(band), CORR_NFFT),
             buf: Vec::new(),
             base: 0,
             search_pos: 0,
             state: State::Search,
             threshold: DEFAULT_THRESHOLD,
             stats: RxStats::default(),
+            decoder: Decoder::Classic,
         }
     }
 
@@ -133,7 +139,7 @@ impl Receiver {
             }
             State::Marker { at, score } => {
                 let Some(x) = self.slice(at, modem::marker_len()) else { return false };
-                match modem::decode_marker(x) {
+                match modem::decode_marker(x, self.band) {
                     Some(id) => self.state = State::Header { at: at + modem::marker_len() as u64, id, score },
                     None => self.fail("marker", at, events),
                 }
@@ -143,8 +149,12 @@ impl Receiver {
                 let p = id.profile();
                 let len = modem::header_samples(p);
                 let Some(x) = self.slice(at, len) else { return false };
-                let soft = modem::demod_bytes(p, x, HEADER_CW_LEN);
-                match frame::decode_header(&soft.bytes, &soft.suspects()) {
+                let (soft, hdr) = self.try_decoders(|d| {
+                    let s = modem::demod_bytes(p, self.band, x, HEADER_CW_LEN, d);
+                    let h = frame::decode_header(&s.bytes, &s.suspects());
+                    (s, h)
+                });
+                match hdr {
                     Some(h) if h.len == 0 => {
                         self.finish(Frame::from_parts(h, Vec::new()), id, soft.snr_db, score, at, at + len as u64, events)
                     }
@@ -160,8 +170,13 @@ impl Receiver {
                 let n = modem::payload_cw_len(p, header.len as usize);
                 let len = modem::payload_samples(p, header.len as usize);
                 let Some(x) = self.slice(at, len) else { return false };
-                let soft = modem::demod_bytes(p, x, n);
-                match frame::decode_payload(&soft.bytes, p.parity, &soft.suspects()) {
+                let want = header.len as usize;
+                let (soft, pay) = self.try_decoders(|d| {
+                    let s = modem::demod_bytes(p, self.band, x, n, d);
+                    let r = frame::decode_payload(&s.bytes, modem::payload_parity(p, want), &s.suspects()).filter(|v| v.len() == want);
+                    (s, r)
+                });
+                match pay {
                     Some(payload) if payload.len() == header.len as usize => {
                         let snr = (snr_db + soft.snr_db) / 2.0;
                         self.finish(Frame::from_parts(header, payload), id, snr, score, at, at + len as u64, events)
@@ -173,11 +188,26 @@ impl Receiver {
         }
     }
 
+    /// Runs the decode with the selected decoder; in ML mode, retries with classic if the CRC fails.
+    /// Both results are CRC-checked, so the fallback can only add frames, never wrong ones.
+    fn try_decoders<T>(&self, mut f: impl FnMut(Decoder) -> (modem::Soft, Option<T>)) -> (modem::Soft, Option<T>) {
+        let first = f(self.decoder);
+        if first.1.is_some() || self.decoder == Decoder::Classic {
+            return first;
+        }
+        let second = f(Decoder::Classic);
+        if second.1.is_some() {
+            second
+        } else {
+            first
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn finish(&mut self, f: Frame, id: ProfileId, snr_db: f32, score: f32, at: u64, end: u64, events: &mut Vec<RxEvent>) {
         self.stats.frames += 1;
         self.stats.last_snr_db = snr_db;
-        events.push(RxEvent::Frame { frame: f, profile: id, snr_db, score, at });
+        events.push(RxEvent::Frame { frame: f, profile: id, band: self.band, snr_db, score, at });
         self.search_pos = end;
         self.state = State::Search;
     }

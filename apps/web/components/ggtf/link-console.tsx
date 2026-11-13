@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { ConnectGhost } from "@/components/ggtf/ghost";
+import { SoundSettings } from "@/components/ggtf/sound-settings";
 import { Spectrogram } from "@/components/ggtf/spectrogram";
 import { useStation } from "@/hooks/use-station";
 import { STATE_LABEL, stateTone, stationLabel } from "@/lib/ggtf/format";
@@ -47,7 +48,7 @@ const LOG_TONE: Record<LogLine["tone"], string> = {
 };
 
 export function LinkConsole() {
-  const { view, analyser, start, call, accept, decline, hangup, reject, confirm, setAnswer, send, testSpeaker } = useStation();
+  const { view, analyser, start, call, accept, decline, hangup, reject, confirm, setAnswer, send, testSpeaker, setBand, setMl, setVolume } = useStation();
   const [draft, setDraft] = useState("");
   const [ghost, setGhost] = useState(false);
   const logEnd = useRef<HTMLDivElement>(null);
@@ -211,6 +212,18 @@ export function LinkConsole() {
             </CardContent>
           </Card>
 
+          <SoundSettings
+            band={view.band}
+            ml={view.ml}
+            mlAvailable={view.mlAvailable}
+            volume={view.volume}
+            started={view.started}
+            disabled={view.state !== "idle"}
+            onBand={setBand}
+            onMl={setMl}
+            onVolume={setVolume}
+          />
+
           <Card>
             <CardHeader>
               <CardTitle>Link status</CardTitle>
@@ -218,6 +231,8 @@ export function LinkConsole() {
             <CardContent>
               <Stat label="Role" value={view.role ?? "—"} />
               <Stat label="Profile" value={view.state === "idle" ? "—" : view.profile} />
+              <Stat label="Band" value={view.stats?.band ?? "—"} />
+              <Stat label="Decoder" value={view.stats?.decoder ?? (view.ml ? "ml" : "classic")} />
               <Stat label="Signal margin" value={s && s.frames > 0 ? `${s.last_snr.toFixed(1)} dB` : "—"} />
               <Separator className="my-2" />
               <Stat label="Frames sent" value={s?.tx_frames ?? 0} />

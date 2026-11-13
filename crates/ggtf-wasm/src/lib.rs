@@ -1,11 +1,27 @@
 //! WebAssembly bindings. Events cross the boundary as JSON strings to keep the JS side simple.
 
+use ggtf_core::beam::BeamEvent;
 use ggtf_core::bench;
 use ggtf_core::link::{LinkEvent, Role};
-use ggtf_core::profile::ProfileId;
+use ggtf_core::ml::{self, Decoder};
+use ggtf_core::profile::{Band, ProfileId};
 use ggtf_core::station::{Station, StationEvent};
 use serde_json::{json, Value};
 use wasm_bindgen::prelude::*;
+
+/// Standard base64 (RFC 4648), so binary beams (images) can travel inside the JSON events.
+fn base64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for c in data.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if c.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if c.len() > 2 { T[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
 
 fn role_name(r: Option<Role>) -> Value {
     match r {
@@ -17,12 +33,22 @@ fn role_name(r: Option<Role>) -> Value {
 
 fn event_json(e: &StationEvent) -> Value {
     match e {
-        StationEvent::Detected { score } => json!({ "type": "detect", "score": score }),
-        StationEvent::RxFailed { stage } => json!({ "type": "rx_failed", "stage": stage }),
-        StationEvent::RxFrame { kind, profile, snr_db, from, own } => json!({
-            "type": "rx_frame", "kind": kind.name(), "profile": profile.name(), "snr": snr_db, "from": from, "own": own
+        StationEvent::Detected { score, band } => json!({ "type": "detect", "score": score, "band": band.name() }),
+        StationEvent::RxFailed { stage, band } => json!({ "type": "rx_failed", "stage": stage, "band": band.name() }),
+        StationEvent::RxFrame { kind, profile, band, snr_db, from, own } => json!({
+            "type": "rx_frame", "kind": kind.name(), "profile": profile.name(), "band": band.name(), "snr": snr_db, "from": from, "own": own
         }),
-        StationEvent::Tx { kind, profile, ms } => json!({ "type": "tx", "kind": kind.name(), "profile": profile.name(), "ms": ms }),
+        StationEvent::Tx { kind, profile, band, ms } => json!({ "type": "tx", "kind": kind.name(), "profile": profile.name(), "band": band.name(), "ms": ms }),
+        StationEvent::Beam(BeamEvent::Progress { id, from, have, count, got }) => json!({
+            "type": "beam_progress", "id": id, "from": from, "have": have, "count": count,
+            "got": got.iter().map(|&g| if g { '1' } else { '0' }).collect::<String>()
+        }),
+        StationEvent::Beam(BeamEvent::Complete { id, from, message }) => json!({
+            "type": "beam_rx", "id": id, "from": from, "bytes": message.len(),
+            "text": String::from_utf8_lossy(message), "b64": base64(message)
+        }),
+        StationEvent::BeamRound { id, round, chunks } => json!({ "type": "beam_round", "id": id, "round": round, "chunks": chunks }),
+        StationEvent::BeamStopped { id, rounds } => json!({ "type": "beam_stopped", "id": id, "rounds": rounds }),
         StationEvent::Link(l) => match l {
             LinkEvent::State { state, role, peer, profile } => json!({
                 "type": "state", "state": state.name(), "role": role_name(*role), "peer": peer, "profile": profile.name()
@@ -38,6 +64,22 @@ fn event_json(e: &StationEvent) -> Value {
             LinkEvent::Incoming { from } => json!({ "type": "incoming", "from": from }),
             LinkEvent::IncomingGone => json!({ "type": "incoming_gone" }),
         },
+    }
+}
+
+fn band(v: u8) -> Band {
+    Band::from_u8(v).unwrap_or(Band::Mid)
+}
+
+fn profile(v: u8) -> ProfileId {
+    ProfileId::from_u8(v).unwrap_or(ProfileId::Specter)
+}
+
+fn decoder(ml_on: bool) -> Decoder {
+    if ml_on && ml::model_available() {
+        Decoder::Ml
+    } else {
+        Decoder::Classic
     }
 }
 
@@ -102,9 +144,35 @@ impl WasmStation {
         self.inner.hangup(now);
     }
 
+    /// Band for outgoing calls and beams: 0 low, 1 mid, 2 high.
+    pub fn set_band(&mut self, b: u8) {
+        self.inner.set_band(band(b));
+    }
+
+    /// Turns the ML symbol decoder on or off. Returns whether ML is now active.
+    pub fn set_ml(&mut self, on: bool) -> bool {
+        let d = decoder(on);
+        self.inner.set_decoder(d);
+        d == Decoder::Ml
+    }
+
     /// Returns the message id, or -1 when the link isn't connected.
     pub fn send_text(&mut self, text: &str, now: f64) -> i32 {
         self.inner.send_text(text.as_bytes(), now).map(|v| v as i32).unwrap_or(-1)
+    }
+
+    /// Starts broadcasting `text`. `rounds` 0 = until stopped. Returns the beam id, or -1.
+    pub fn beam_start(&mut self, text: &str, profile_id: u8, band_id: u8, rounds: u32) -> i32 {
+        self.inner.beam_start(text.as_bytes(), profile(profile_id), band(band_id), rounds).map(|v| v as i32).unwrap_or(-1)
+    }
+
+    /// Broadcasts raw bytes (used for images). `chunk` is the bytes per frame (16 to 196).
+    pub fn beam_start_bytes(&mut self, data: &[u8], profile_id: u8, band_id: u8, rounds: u32, chunk: u32) -> i32 {
+        self.inner.beam_start_chunked(data, profile(profile_id), band(band_id), rounds, chunk as usize).map(|v| v as i32).unwrap_or(-1)
+    }
+
+    pub fn beam_stop(&mut self) {
+        self.inner.beam_stop();
     }
 
     pub fn take_events(&mut self) -> String {
@@ -113,17 +181,39 @@ impl WasmStation {
     }
 
     pub fn stats(&self) -> String {
-        let r = &self.inner.rx.stats;
+        let r = self.inner.rx_stats();
         let s = &self.inner.stats;
         json!({
             "detections": r.detections, "frames": r.frames, "marker_fail": r.marker_fail,
             "header_fail": r.header_fail, "payload_fail": r.payload_fail,
             "last_snr": r.last_snr_db, "last_score": r.last_score,
             "tx_frames": s.tx_frames, "rx_frames": s.rx_frames, "own_frames": s.own_frames,
-            "busy": self.inner.rx.busy()
+            "busy": self.inner.busy(), "beaming": self.inner.beaming(),
+            "decoder": self.inner.decoder().name(), "band": self.inner.link.band().name()
         })
         .to_string()
     }
+}
+
+/// Seconds of airtime for one beam round, computed by the real modem.
+#[wasm_bindgen]
+pub fn beam_round_seconds(bytes: u32, profile_id: u8, chunk: u32) -> f64 {
+    let chunk = (chunk as usize).clamp(16, ggtf_core::beam::MAX_CHUNK);
+    let total = bytes as usize + 4;
+    let id = profile(profile_id);
+    let mut ms = 0.0;
+    let mut left = total;
+    while left > 0 {
+        let c = left.min(chunk);
+        ms += ggtf_core::modem::airtime_ms(id, 4 + c);
+        left -= c;
+    }
+    ms / 1000.0
+}
+
+#[wasm_bindgen]
+pub fn ml_available() -> bool {
+    ml::model_available()
 }
 
 #[wasm_bindgen]
@@ -132,7 +222,19 @@ pub fn profiles_json() -> String {
         .iter()
         .map(|id| {
             let p = id.profile();
-            json!({ "id": *id as u8, "name": p.name, "raw_bps": p.raw_bps(), "lo_hz": p.base_hz, "hi_hz": p.top_hz(), "parity": p.parity })
+            json!({ "id": *id as u8, "name": p.name, "raw_bps": p.raw_bps(), "groups": p.groups, "lo_hz": p.low_hz(Band::Mid), "hi_hz": p.top_hz(Band::Mid), "parity": p.parity })
+        })
+        .collect();
+    Value::Array(v).to_string()
+}
+
+#[wasm_bindgen]
+pub fn bands_json() -> String {
+    let v: Vec<Value> = Band::ALL
+        .iter()
+        .map(|b| {
+            let (lo, hi) = b.chirp();
+            json!({ "id": *b as u8, "name": b.name(), "lo_hz": lo, "hi_hz": hi + 300.0 })
         })
         .collect();
     Value::Array(v).to_string()
@@ -140,7 +242,7 @@ pub fn profiles_json() -> String {
 
 #[wasm_bindgen]
 pub fn scenarios_json() -> String {
-    let v: Vec<Value> = bench::scenarios().iter().enumerate().map(|(i, s)| json!({ "index": i, "key": s.key, "name": s.name })).collect();
+    let v: Vec<Value> = bench::scenarios().iter().enumerate().map(|(i, s)| json!({ "index": i, "key": s.key, "name": s.name, "tier": s.tier })).collect();
     Value::Array(v).to_string()
 }
 
@@ -149,24 +251,26 @@ fn scenario(i: u32) -> Option<bench::Scenario> {
 }
 
 #[wasm_bindgen]
-pub fn bench_run(scenario_index: u32, profile: u8, frames: u32, payload_len: u32, seed: u32) -> String {
-    let (Some(sc), Some(id)) = (scenario(scenario_index), ProfileId::from_u8(profile)) else {
-        return json!({ "error": "unknown scenario or profile" }).to_string();
+pub fn bench_run(scenario_index: u32, profile_id: u8, band_id: u8, ml_on: bool, frames: u32, payload_len: u32, seed: u32) -> String {
+    let Some(sc) = scenario(scenario_index) else {
+        return json!({ "error": "unknown scenario" }).to_string();
     };
-    let r = bench::run(&sc, id, frames, payload_len.clamp(1, 64) as usize, seed as u64);
+    let (id, b, d) = (profile(profile_id), band(band_id), decoder(ml_on));
+    let r = bench::run(&sc, id, b, d, frames, payload_len.clamp(1, 64) as usize, seed as u64);
     json!({
-        "scenario": sc.key, "name": sc.name, "profile": id.name(), "frames": r.frames, "ok": r.ok,
-        "missed": r.missed, "marker_fail": r.marker_fail, "header_fail": r.header_fail, "payload_fail": r.payload_fail,
-        "corrupted": r.corrupted, "success": r.success_rate(), "goodput_bps": r.goodput_bps, "mean_snr_db": r.mean_snr_db
+        "scenario": sc.key, "name": sc.name, "tier": sc.tier, "profile": id.name(), "band": b.name(), "decoder": d.name(),
+        "frames": r.frames, "ok": r.ok, "missed": r.missed, "marker_fail": r.marker_fail, "header_fail": r.header_fail,
+        "payload_fail": r.payload_fail, "corrupted": r.corrupted, "success": r.success_rate(), "goodput_bps": r.goodput_bps,
+        "mean_snr_db": r.mean_snr_db
     })
     .to_string()
 }
 
 /// One degraded test frame as audio, for the "listen" button in the lab.
 #[wasm_bindgen]
-pub fn bench_sample(scenario_index: u32, profile: u8, payload_len: u32, seed: u32) -> Vec<f32> {
-    match (scenario(scenario_index), ProfileId::from_u8(profile)) {
-        (Some(sc), Some(id)) => bench::sample_audio(&sc, id, payload_len.clamp(1, 64) as usize, seed as u64),
-        _ => Vec::new(),
+pub fn bench_sample(scenario_index: u32, profile_id: u8, band_id: u8, payload_len: u32, seed: u32) -> Vec<f32> {
+    match scenario(scenario_index) {
+        Some(sc) => bench::sample_audio(&sc, profile(profile_id), band(band_id), payload_len.clamp(1, 64) as usize, seed as u64),
+        None => Vec::new(),
     }
 }

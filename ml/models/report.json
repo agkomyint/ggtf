@@ -1,0 +1,11 @@
+{
+  "train_symbols": 508786,
+  "val_symbols": 95276,
+  "classic_val_accuracy": 0.8770309416852093,
+  "ml_val_accuracy": 0.8912842869758606,
+  "symbol_error_rate_classic": 0.12296905831479066,
+  "symbol_error_rate_ml": 0.1087157130241394,
+  "error_reduction": 0.11591001416115479,
+  "params": 28400,
+  "bin_bytes": 113632
+}

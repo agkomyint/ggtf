@@ -8,6 +8,15 @@ export class WasmStation {
      * Picks up a pending incoming call. Returns false if there is none (or it expired).
      */
     accept(now: number): boolean;
+    /**
+     * Starts broadcasting `text`. `rounds` 0 = until stopped. Returns the beam id, or -1.
+     */
+    beam_start(text: string, profile_id: number, band_id: number, rounds: number): number;
+    /**
+     * Broadcasts raw bytes (used for images). `chunk` is the bytes per frame (16 to 196).
+     */
+    beam_start_bytes(data: Uint8Array | number[], profile_id: number, band_id: number, rounds: number, chunk: number): number;
+    beam_stop(): void;
     call(now: number): void;
     confirm(now: number): void;
     decline(): void;
@@ -22,18 +31,35 @@ export class WasmStation {
      */
     send_text(text: string, now: number): number;
     set_answer(on: boolean): void;
+    /**
+     * Band for outgoing calls and beams: 0 low, 1 mid, 2 high.
+     */
+    set_band(b: number): void;
+    /**
+     * Turns the ML symbol decoder on or off. Returns whether ML is now active.
+     */
+    set_ml(on: boolean): boolean;
     stats(): string;
     take_events(): string;
     tick(now: number): void;
     tx_done(now: number): void;
 }
 
-export function bench_run(scenario_index: number, profile: number, frames: number, payload_len: number, seed: number): string;
+export function bands_json(): string;
+
+/**
+ * Seconds of airtime for one beam round, computed by the real modem.
+ */
+export function beam_round_seconds(bytes: number, profile_id: number, chunk: number): number;
+
+export function bench_run(scenario_index: number, profile_id: number, band_id: number, ml_on: boolean, frames: number, payload_len: number, seed: number): string;
 
 /**
  * One degraded test frame as audio, for the "listen" button in the lab.
  */
-export function bench_sample(scenario_index: number, profile: number, payload_len: number, seed: number): Float32Array;
+export function bench_sample(scenario_index: number, profile_id: number, band_id: number, payload_len: number, seed: number): Float32Array;
+
+export function ml_available(): boolean;
 
 export function profiles_json(): string;
 
@@ -44,11 +70,17 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_wasmstation_free: (a: number, b: number) => void;
-    readonly bench_run: (a: number, b: number, c: number, d: number, e: number) => [number, number];
-    readonly bench_sample: (a: number, b: number, c: number, d: number) => [number, number];
+    readonly bands_json: () => [number, number];
+    readonly beam_round_seconds: (a: number, b: number, c: number) => number;
+    readonly bench_run: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
+    readonly bench_sample: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+    readonly ml_available: () => number;
     readonly profiles_json: () => [number, number];
     readonly scenarios_json: () => [number, number];
     readonly wasmstation_accept: (a: number, b: number) => number;
+    readonly wasmstation_beam_start: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly wasmstation_beam_start_bytes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
+    readonly wasmstation_beam_stop: (a: number) => void;
     readonly wasmstation_call: (a: number, b: number) => void;
     readonly wasmstation_confirm: (a: number, b: number) => void;
     readonly wasmstation_decline: (a: number) => void;
@@ -60,6 +92,8 @@ export interface InitOutput {
     readonly wasmstation_reject: (a: number, b: number) => void;
     readonly wasmstation_send_text: (a: number, b: number, c: number, d: number) => number;
     readonly wasmstation_set_answer: (a: number, b: number) => void;
+    readonly wasmstation_set_band: (a: number, b: number) => void;
+    readonly wasmstation_set_ml: (a: number, b: number) => number;
     readonly wasmstation_stats: (a: number) => [number, number];
     readonly wasmstation_take_events: (a: number) => [number, number];
     readonly wasmstation_tick: (a: number, b: number) => void;

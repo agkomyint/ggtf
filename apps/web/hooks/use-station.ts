@@ -37,6 +37,21 @@ export interface StationView {
   audioState: string | null;
   outLevel: number;
   outputDevice: string | null;
+  band: number;
+  ml: boolean;
+  mlAvailable: boolean;
+  volume: number;
+  bands: BandInfo[];
+  beam: { sending: boolean; id: number | null; round: number; chunks: number; text: string | null; bytes: number; startedAt: number; lastRoundSec: number | null };
+  beamProgress: { id: number; from: number; have: number; count: number; got: string; firstAt: number } | null;
+  beamInbox: { key: string; id: number; from: number; text: string; b64: string; bytes: number; at: number; seconds: number | null }[];
+}
+
+export interface BandInfo {
+  id: number;
+  name: "low" | "mid" | "high";
+  lo_hz: number;
+  hi_hz: number;
 }
 
 const MAX_LOG = 200;
@@ -65,7 +80,16 @@ export function useStation() {
     audioState: null,
     outLevel: 0,
     outputDevice: null,
+    band: 1,
+    ml: true,
+    mlAvailable: false,
+    volume: 1,
+    bands: [],
+    beam: { sending: false, id: null, round: 0, chunks: 0, text: null, bytes: 0, startedAt: 0, lastRoundSec: null },
+    beamProgress: null,
+    beamInbox: [],
   }));
+  const nodeRef = useRef<AudioWorkletNode | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -147,6 +171,54 @@ export function useStation() {
         case "incoming_gone":
           setView((v) => ({ ...v, incoming: null }));
           break;
+        case "beam_progress":
+          setView((v) => ({
+            ...v,
+            beamProgress: {
+              id: e.id,
+              from: e.from,
+              have: e.have,
+              count: e.count,
+              got: e.got,
+              firstAt: v.beamProgress && v.beamProgress.id === e.id && v.beamProgress.from === e.from ? v.beamProgress.firstAt : Date.now(),
+            },
+          }));
+          break;
+        case "beam_rx":
+          setView((v) =>
+            v.beamInbox.some((b) => b.id === e.id && b.from === e.from)
+              ? v
+              : {
+                  ...v,
+                  beamProgress: null,
+                  beamInbox: [
+                    {
+                      key: `${e.from}-${e.id}`,
+                      id: e.id,
+                      from: e.from,
+                      text: e.text,
+                      b64: e.b64,
+                      bytes: e.bytes,
+                      at: Date.now(),
+                      seconds: v.beamProgress && v.beamProgress.id === e.id ? (Date.now() - v.beamProgress.firstAt) / 1000 : null,
+                    },
+                    ...v.beamInbox,
+                  ],
+                },
+          );
+          addLog(`beam received from ${stationLabel(e.from)} (${e.bytes} bytes)`, "good");
+          toast.success("Caught a beam from the ether", { description: e.b64.startsWith("AEdJ") ? `an image, ${e.bytes} bytes` : e.text.length > 60 ? e.text.slice(0, 60) + "…" : e.text });
+          break;
+        case "beam_round":
+          setView((v) => {
+            const sec = (Date.now() - v.beam.startedAt) / 1000 / Math.max(1, e.round);
+            return { ...v, beam: { ...v.beam, round: e.round, chunks: e.chunks, lastRoundSec: sec } };
+          });
+          break;
+        case "beam_stopped":
+          setView((v) => ({ ...v, beam: { ...v.beam, sending: false } }));
+          addLog(`beam stopped after ${e.rounds} round${e.rounds === 1 ? "" : "s"}`);
+          break;
         case "detect":
           break;
         case "rx_failed":
@@ -199,6 +271,8 @@ export function useStation() {
       });
       src.connect(node);
       node.connect(ctx.destination);
+      nodeRef.current = node;
+      node.port.postMessage({ type: "volume", value: view.volume });
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0;
@@ -221,12 +295,16 @@ export function useStation() {
         worker.onmessage = (ev) => {
           const m = ev.data;
           if (m.type === "ready") {
-            setView((v) => ({ ...v, profiles: m.profiles }));
+            setView((v) => ({ ...v, profiles: m.profiles, bands: m.bands, mlAvailable: !!m.mlAvailable, ml: v.ml && !!m.mlAvailable }));
             resolve();
           } else if (m.type === "events") {
             (m.events as StationEvent[]).forEach(handleEvent);
           } else if (m.type === "stats") {
             setView((v) => ({ ...v, stats: m.stats, txKind: m.stats.transmitting ? v.txKind : null }));
+          } else if (m.type === "ml") {
+            setView((v) => ({ ...v, ml: !!m.on }));
+          } else if (m.type === "beam-started") {
+            setView((v) => ({ ...v, beam: { ...v.beam, sending: m.id >= 0, id: m.id >= 0 ? m.id : null, round: 0, bytes: m.bytes ?? 0, startedAt: Date.now(), lastRoundSec: null } }));
           } else if (m.type === "sent") {
             setView((v) => ({
               ...v,
@@ -242,7 +320,7 @@ export function useStation() {
         };
         worker.onerror = (err) => reject(new Error(err.message || "worker failed to load"));
         worker.postMessage(
-          { type: "init-station", id: view.id, seed: view.id * 7919 + Date.now() % 100000, answer: view.answer, port: channel.port2 },
+          { type: "init-station", id: view.id, seed: view.id * 7919 + Date.now() % 100000, answer: view.answer, band: view.band, ml: view.ml, port: channel.port2 },
           [channel.port2],
         );
       });
@@ -262,7 +340,7 @@ export function useStation() {
       diag("start_failed", { message: msg, name: err instanceof Error ? err.name : typeof err });
       setView((v) => ({ ...v, starting: false, error: msg }));
     }
-  }, [view.starting, view.id, view.answer, handleEvent, addLog]);
+  }, [view.starting, view.id, view.answer, view.band, view.ml, view.volume, handleEvent, addLog]);
 
   const post = useCallback((m: Record<string, unknown>) => {
     diag("action", { action: m.type, hasWorker: !!workerRef.current, audio: ctxRef.current?.state ?? null });
@@ -354,6 +432,36 @@ export function useStation() {
     },
     [post],
   );
+  const setBand = useCallback(
+    (band: number) => {
+      setView((v) => ({ ...v, band }));
+      post({ type: "band", band });
+    },
+    [post],
+  );
+  const setMl = useCallback(
+    (on: boolean) => {
+      setView((v) => ({ ...v, ml: on }));
+      post({ type: "ml", on });
+    },
+    [post],
+  );
+  const setVolume = useCallback((value: number) => {
+    setView((v) => ({ ...v, volume: value }));
+    nodeRef.current?.port.postMessage({ type: "volume", value });
+  }, []);
+  /** Starts a beam of text or raw bytes (images). `chunk` = bytes per frame. */
+  const beamStart = useCallback(
+    (content: string | Uint8Array, profile: number, rounds = 0, chunk = 48) => {
+      wake();
+      const text = typeof content === "string" ? content : null;
+      setView((v) => ({ ...v, beam: { sending: true, id: null, round: 0, chunks: 0, text, bytes: 0, startedAt: Date.now(), lastRoundSec: null } }));
+      if (typeof content === "string") post({ type: "beam-start", text: content, profile, band: viewRef.current.band, rounds, chunk });
+      else post({ type: "beam-start", bytes: content, profile, band: viewRef.current.band, rounds, chunk });
+    },
+    [post, wake],
+  );
+  const beamStop = useCallback(() => post({ type: "beam-stop" }), [post]);
   const send = useCallback(
     (text: string) => {
       const ref = `out-${msgKey.current++}`;
@@ -366,5 +474,5 @@ export function useStation() {
     [post],
   );
 
-  return { view, analyser: analyserRef, start, call, accept, decline, hangup, reject, confirm, setAnswer, send, testSpeaker };
+  return { view, analyser: analyserRef, start, call, accept, decline, hangup, reject, confirm, setAnswer, send, testSpeaker, setBand, setMl, setVolume, beamStart, beamStop };
 }

@@ -19,7 +19,14 @@ class GgtfProcessor extends AudioWorkletProcessor {
     this.curPos = 0;
     this.worker = null;
     this.peak = 0;
+    // Output volume (0..1), with a short ramp so changes never click.
+    this.gain = 1;
+    this.gainNow = 1;
     this.port.onmessage = (e) => {
+      if (e.data.type === "volume") {
+        this.gain = Math.max(0, Math.min(1, e.data.value));
+        return;
+      }
       if (e.data.type === "port") {
         this.worker = e.data.port;
         this.worker.onmessage = (ev) => {
@@ -78,7 +85,8 @@ class GgtfProcessor extends AudioWorkletProcessor {
           const f = this.curPos - i0;
           const a = this.cur[i0] || 0;
           const b = this.cur[i0 + 1] || 0;
-          ch[i] = a + (b - a) * f;
+          this.gainNow += (this.gain - this.gainNow) * 0.002;
+          ch[i] = (a + (b - a) * f) * this.gainNow;
           this.curPos += step;
           if (this.curPos >= this.cur.length) {
             this.cur = null;

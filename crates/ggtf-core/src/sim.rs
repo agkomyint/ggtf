@@ -30,6 +30,9 @@ pub struct Channel {
     pub burst_ms: f32,
     pub drift_ppm: f32,
     pub clip: Option<f32>,
+    /// Speaker/mic frequency response: 4th-order high-pass and low-pass corners.
+    pub highpass_hz: Option<f32>,
+    pub lowpass_hz: Option<f32>,
     pub lead_ms: f32,
     pub tail_ms: f32,
 }
@@ -51,6 +54,8 @@ impl Default for Channel {
             burst_ms: 80.0,
             drift_ppm: 0.0,
             clip: None,
+            highpass_hz: None,
+            lowpass_hz: None,
             lead_ms: 300.0,
             tail_ms: 600.0,
         }
@@ -191,6 +196,21 @@ pub fn apply(signal: &[f32], ch: &Channel) -> Vec<f32> {
     if let Some(rt) = ch.reverb_rt60_ms {
         let ir = reverb_ir(rt, ch.reverb_wet, &mut rng);
         x = dsp::fft_convolve(&x, &ir);
+    }
+    if ch.highpass_hz.is_some() || ch.lowpass_hz.is_some() {
+        use crate::dsp::Biquad;
+        let mut stages = Vec::new();
+        if let Some(f) = ch.highpass_hz {
+            stages.push(Biquad::highpass(f, SR, 0.541_196_1));
+            stages.push(Biquad::highpass(f, SR, 1.306_563));
+        }
+        if let Some(f) = ch.lowpass_hz {
+            stages.push(Biquad::lowpass(f, SR, 0.541_196_1));
+            stages.push(Biquad::lowpass(f, SR, 1.306_563));
+        }
+        for v in x.iter_mut() {
+            *v = stages.iter_mut().fold(*v, |a, s| s.process(a));
+        }
     }
     let n = x.len();
     if let Some(snr) = ch.white_snr_db {

@@ -16,7 +16,7 @@
 use crate::crypto::{self, KeyPair, SessionKeys, KIND_ACK, KIND_DATA};
 use crate::frame::{Frame, FrameType, BROADCAST};
 use crate::modem::airtime_ms;
-use crate::profile::ProfileId;
+use crate::profile::{Band, ProfileId};
 use crate::rng::Rng;
 use std::collections::VecDeque;
 
@@ -115,6 +115,7 @@ enum Expect {
 pub struct TxRequest {
     pub frame: Frame,
     pub profile: ProfileId,
+    pub band: Band,
     expect: Option<Expect>,
     close_after: bool,
 }
@@ -142,6 +143,10 @@ pub struct Link {
     role: Option<Role>,
     peer: Option<u16>,
     profile: ProfileId,
+    /// Band of the current session.
+    band: Band,
+    /// Band the user picked for outgoing calls.
+    pref_band: Band,
     queue: VecDeque<TxRequest>,
     /// Some(..) while a frame is handed out and still playing.
     transmitting: Option<(Option<Expect>, bool)>,
@@ -162,7 +167,7 @@ pub struct Link {
     peer_confirmed: bool,
     last_rx: f64,
     /// Most recent caller heard while idle with auto-answer off: (station, time heard).
-    incoming: Option<(u16, f64)>,
+    incoming: Option<(u16, f64, Band)>,
 }
 
 /// How long an unanswered incoming call stays acceptable after its last CALL frame.
@@ -189,6 +194,8 @@ impl Link {
             role: None,
             peer: None,
             profile: ProfileId::Wraith,
+            band: Band::Mid,
+            pref_band: Band::Mid,
             queue: VecDeque::new(),
             transmitting: None,
             timer: None,
@@ -212,14 +219,26 @@ impl Link {
     }
 
     pub fn incoming(&self) -> Option<u16> {
-        self.incoming.map(|(id, _)| id)
+        self.incoming.map(|(id, _, _)| id)
+    }
+
+    pub fn band(&self) -> Band {
+        self.band
+    }
+
+    /// Band used for the next outgoing call (takes effect when idle).
+    pub fn set_band(&mut self, b: Band) {
+        self.pref_band = b;
+        if self.state == LinkState::Idle {
+            self.band = b;
+        }
     }
 
     /// Picks up the pending incoming call, if it is still fresh.
     pub fn accept(&mut self, now: f64) -> bool {
         match self.incoming.take() {
-            Some((from, at)) if self.state == LinkState::Idle && now - at <= INCOMING_TTL_MS => {
-                self.answer_call(from, now);
+            Some((from, at, band)) if self.state == LinkState::Idle && now - at <= INCOMING_TTL_MS => {
+                self.answer_call(from, band, now);
                 true
             }
             _ => false,
@@ -232,8 +251,9 @@ impl Link {
         }
     }
 
-    fn answer_call(&mut self, from: u16, now: f64) {
+    fn answer_call(&mut self, from: u16, band: Band, now: f64) {
         self.reset_session();
+        self.band = band;
         if self.incoming.take().is_some() {
             self.events.push(LinkEvent::IncomingGone);
         }
@@ -283,7 +303,7 @@ impl Link {
     }
 
     fn enqueue(&mut self, frame: Frame, profile: ProfileId, expect: Option<Expect>, front: bool) {
-        let r = TxRequest { frame, profile, expect, close_after: false };
+        let r = TxRequest { frame, profile, band: self.band, expect, close_after: false };
         if front {
             self.queue.push_front(r)
         } else {
@@ -310,6 +330,7 @@ impl Link {
         self.role = None;
         self.peer = None;
         self.profile = ProfileId::Wraith;
+        self.band = self.pref_band;
         self.queue.clear();
         self.timer = None;
         self.attempts = 0;
@@ -538,7 +559,7 @@ impl Link {
     // ---------- timers ----------
 
     pub fn tick(&mut self, now: f64) {
-        if let Some((_, at)) = self.incoming {
+        if let Some((_, at, _)) = self.incoming {
             if now - at > INCOMING_TTL_MS {
                 self.incoming = None;
                 self.events.push(LinkEvent::IncomingGone);
@@ -626,12 +647,12 @@ impl Link {
 
     // ---------- receive side ----------
 
-    pub fn on_frame(&mut self, f: &Frame, rx_profile: ProfileId, now: f64) {
+    pub fn on_frame(&mut self, f: &Frame, rx_profile: ProfileId, rx_band: Band, now: f64) {
         if f.src == self.id || (f.dst != self.id && f.dst != BROADCAST) {
             return;
         }
         if f.ftype == FrameType::Call {
-            self.on_call(f, now);
+            self.on_call(f, rx_band, now);
             return;
         }
         let from_peer = self.peer == Some(f.src);
@@ -672,13 +693,17 @@ impl Link {
         }
     }
 
-    fn on_call(&mut self, f: &Frame, now: f64) {
+    fn on_call(&mut self, f: &Frame, band: Band, now: f64) {
         if self.state == LinkState::Idle && self.answer_enabled {
-            self.answer_call(f.src, now);
+            self.answer_call(f.src, band, now);
+        } else if self.state == LinkState::Calling && self.role == Some(Role::Caller) && f.src != self.id && self.id < f.src {
+            // Both sides pressed Call ("glare"): the lower station id gives way and answers.
+            self.log(format!("both sides called at once; answering {:04X}", f.src));
+            self.answer_call(f.src, band, now);
         } else if self.state == LinkState::Idle {
             // Announce once per caller; later CALL retries just keep it fresh.
-            let new = self.incoming.map(|(id, _)| id) != Some(f.src);
-            self.incoming = Some((f.src, now));
+            let new = self.incoming.map(|(id, _, _)| id) != Some(f.src);
+            self.incoming = Some((f.src, now, band));
             if new {
                 self.events.push(LinkEvent::Incoming { from: f.src });
             }

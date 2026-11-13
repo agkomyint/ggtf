@@ -14,6 +14,12 @@ export function SiteHeader() {
           <Link href="/link" className={buttonVariants({ variant: "ghost", size: "sm" })}>
             Séance link
           </Link>
+          <Link href="/beam" className={buttonVariants({ variant: "ghost", size: "sm" })}>
+            Haunted QR
+          </Link>
+          <Link href="/haunt" className={buttonVariants({ variant: "ghost", size: "sm" })}>
+            Haunted room
+          </Link>
           <Link href="/lab" className={buttonVariants({ variant: "ghost", size: "sm" })}>
             Haunted lab
           </Link>

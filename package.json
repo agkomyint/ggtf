@@ -12,6 +12,9 @@
     "test": "bun run test:rust && bun run test:ts",
     "test:rust": "cargo test --workspace",
     "test:ts": "bun test apps/web",
-    "bench": "cargo run --release -p ggtf-core --example bench"
+    "bench": "cargo run --release -p ggtf-core --example bench",
+    "ml:data": "cargo run --release -p ggtf-core --example ml_data -- ml/data/train 3200 1 && cargo run --release -p ggtf-core --example ml_data -- ml/data/val 600 777",
+    "ml:train": "python ml/train.py --epochs 16",
+    "ml:eval": "cargo run --release -p ggtf-core --example ml_eval"
   }
 }

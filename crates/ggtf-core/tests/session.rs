@@ -154,3 +154,68 @@ fn manual_accept_rings_then_connects() {
     let paired = air.run_until(90_000.0, |s| s.a.link.state() == LinkState::AwaitingConfirm && s.b.link.state() == LinkState::AwaitingConfirm);
     assert!(paired, "no pairing after accept: a={:?} b={:?}", air.a.link.state(), air.b.link.state());
 }
+
+#[test]
+fn both_press_call_at_once_still_connects() {
+    let mut air = Air::new(0.0);
+    air.b.set_answer(false);
+    let now = air.now;
+    air.a.call(now);
+    air.b.call(now);
+    let paired = air.run_until(120_000.0, |s| s.a.link.state() == LinkState::AwaitingConfirm && s.b.link.state() == LinkState::AwaitingConfirm);
+    assert!(paired, "glare not resolved: a={:?} b={:?}", air.a.link.state(), air.b.link.state());
+    // 0xA11A < 0xB22B, so A must have become the answerer.
+    assert_eq!(air.a.link.role(), Some(ggtf_core::link::Role::Answerer));
+}
+
+#[test]
+fn high_band_session_connects_and_chats() {
+    use ggtf_core::profile::Band;
+    let mut air = Air::new(0.01);
+    air.a.set_band(Band::High);
+    connect(&mut air);
+    assert_eq!(air.a.link.band(), Band::High);
+    assert_eq!(air.b.link.band(), Band::High, "answerer should adopt the caller's band");
+    let now = air.now;
+    air.a.send_text(b"quiet as a ghost", now).unwrap();
+    assert!(air.run_until(60_000.0, |s| received(&s.ev_b).len() == 1));
+}
+
+#[test]
+fn beam_reaches_a_listener_with_no_pairing() {
+    use ggtf_core::beam::BeamEvent;
+    use ggtf_core::profile::{Band, ProfileId};
+    let mut air = Air::new(0.03);
+    let msg = b"WIFI:T:WPA;S:Haunted Manor;P:trick-or-treat-2026;; and https://github.com/agkomyint/ggtf".to_vec();
+    air.a.beam_start(&msg, ProfileId::Specter, Band::Mid, 3).unwrap();
+    let got = air.run_until(60_000.0, |s| s.ev_b.iter().any(|e| matches!(e, StationEvent::Beam(BeamEvent::Complete { .. }))));
+    assert!(got, "beam never completed");
+    let text = air.ev_b.iter().find_map(|e| match e {
+        StationEvent::Beam(BeamEvent::Complete { message, .. }) => Some(message.clone()),
+        _ => None,
+    });
+    assert_eq!(text.unwrap(), msg);
+    assert_eq!(air.b.link.state(), LinkState::Idle, "beam must not start a session");
+}
+
+/// Beams a 3 KB binary blob (an "image") with each speed and chunk size, and reports real throughput.
+#[test]
+fn image_sized_beam_throughput() {
+    use ggtf_core::beam::{BeamEvent, CHUNK, MAX_CHUNK};
+    use ggtf_core::profile::{Band, ProfileId};
+    let blob: Vec<u8> = (0..3000u32).map(|i| (i.wrapping_mul(2654435761) >> 13) as u8).collect();
+    for (id, chunk) in [(ProfileId::Banshee, CHUNK), (ProfileId::Banshee, MAX_CHUNK), (ProfileId::Poltergeist, MAX_CHUNK)] {
+        let mut air = Air::new(0.02);
+        let t0 = air.now;
+        air.a.beam_start_chunked(&blob, id, Band::Mid, 0, chunk).unwrap();
+        let ok = air.run_until(240_000.0, |s| s.ev_b.iter().any(|e| matches!(e, StationEvent::Beam(BeamEvent::Complete { .. }))));
+        assert!(ok, "{:?}/{chunk}: image never completed", id);
+        let got = air.ev_b.iter().find_map(|e| match e {
+            StationEvent::Beam(BeamEvent::Complete { message, .. }) => Some(message.clone()),
+            _ => None,
+        });
+        assert_eq!(got.unwrap(), blob);
+        let secs = (air.now - t0) / 1000.0;
+        println!("{:<12} chunk {:>3}: 3000 bytes in {:5.1} s = {:5.1} B/s", id.name(), chunk, secs, 3000.0 / secs);
+    }
+}

@@ -81,14 +81,14 @@ try {
 
   // ---- /lab ----
   await send("Page.navigate", { url: `${base}/lab` });
-  const labReady = await waitFor(`[...document.querySelectorAll('tbody tr')].length >= 10`, 20000);
+  const labReady = await waitFor(`[...document.querySelectorAll('tbody tr')].length >= 20`, 20000);
   console.log("lab: scenarios loaded from WASM:", labReady);
   await evaluate(`(() => { const i = document.querySelector('#frames'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, '3'); i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await clickButton("Run all rooms");
-  const labDone = await waitFor(`[...document.querySelectorAll('tbody tr')].every(r => /\\d+%/.test(r.cells[1].textContent))`, 180000);
-  const rows = await evaluate<string[][]>(`[...document.querySelectorAll('tbody tr')].map(r => [r.cells[0].textContent, r.cells[1].textContent, r.cells[2].textContent])`);
+  const labDone = await waitFor(`[...document.querySelectorAll('tbody tr')].every(r => /\\d+%/.test(r.cells[2].textContent) && /\\d+%/.test(r.cells[3].textContent))`, 300000);
+  const rows = await evaluate<string[][]>(`[...document.querySelectorAll('tbody tr')].map(r => [r.cells[0].textContent, r.cells[2].textContent + ' / ' + r.cells[3].textContent, r.cells[4].textContent])`);
   console.log("lab: all rooms finished:", labDone);
-  for (const r of rows) console.log(`  ${r[0].padEnd(38)} ${r[1].padStart(5)}  ${r[2]}`);
+  for (const r of rows) console.log(`  ${r[0].padEnd(40)} classic/ML ${r[1].replace(/[▲▼]/g, "").padStart(12)}  ${r[2]}`);
   if (!labReady || !labDone) failed = true;
 
   // ---- /link ----
@@ -100,7 +100,7 @@ try {
   const station = await evaluate<string>(`document.body.innerText.match(/station #[0-9A-F]{4}/)?.[0] ?? ''`);
   const rate = await evaluate<string>(`document.body.innerText.match(/(\\d+) Hz/)?.[0] ?? ''`);
   console.log("link: séance opened (worklet + worker + WASM running):", started, station, rate);
-  await clickButton("Summon");
+  await clickButton("Call");
   const calling = await waitFor(`document.body.innerText.includes('→ CALL')`, 10000);
   console.log("link: CALL frame handed to the speaker:", calling);
   const heardOwn = await waitFor(`/Own echoes ignored\\s*[1-9]/.test(document.body.innerText)`, 8000);

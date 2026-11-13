@@ -23,6 +23,10 @@ export type StationEvent =
   | { type: "ended"; reason: string }
   | { type: "incoming"; from: number }
   | { type: "incoming_gone" }
+  | { type: "beam_progress"; id: number; from: number; have: number; count: number; got: string }
+  | { type: "beam_rx"; id: number; from: number; text: string; b64: string; bytes: number }
+  | { type: "beam_round"; id: number; round: number; chunks: number }
+  | { type: "beam_stopped"; id: number; rounds: number }
   | { type: "detect"; score: number }
   | { type: "rx_failed"; stage: string }
   | { type: "rx_frame"; kind: string; profile: ProfileName; snr: number; from: number; own: boolean }
@@ -42,6 +46,9 @@ export interface StationStats {
   busy: boolean;
   peak: number;
   transmitting: boolean;
+  beaming?: boolean;
+  decoder?: string;
+  band?: string;
 }
 
 export interface ProfileInfo {

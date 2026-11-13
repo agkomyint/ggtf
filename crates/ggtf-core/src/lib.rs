@@ -3,12 +3,14 @@
 //! Everything here is plain Rust with no audio device or clock inside, so the same code runs
 //! in the browser (through `ggtf-wasm`), in native tests and in benchmarks.
 
+pub mod beam;
 pub mod bench;
 pub mod crypto;
 pub mod dsp;
 pub mod fec;
 pub mod frame;
 pub mod link;
+pub mod ml;
 pub mod modem;
 pub mod profile;
 pub mod receiver;

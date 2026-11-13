@@ -3,13 +3,13 @@
 use ggtf_core::crypto::{self, KeyPair};
 use ggtf_core::frame::{Frame, FrameType};
 use ggtf_core::modem;
-use ggtf_core::profile::ProfileId;
+use ggtf_core::profile::{Band, ProfileId};
 use ggtf_core::receiver::{Receiver, RxEvent};
 use ggtf_core::sim::{self, Channel};
 use proptest::prelude::*;
 
 fn decode(audio: &[f32]) -> Vec<Frame> {
-    let mut rx = Receiver::new();
+    let mut rx = Receiver::new(Band::Mid);
     let mut out = Vec::new();
     for c in audio.chunks(2048) {
         for e in rx.push(c) {
@@ -33,7 +33,7 @@ proptest! {
     fn roundtrip(payload in prop::collection::vec(any::<u8>(), 1..=64), id in profile(), src in 0u16..0xFFFF, seq: u8) {
         let mut f = Frame::new(FrameType::Data, src, 0x0101, payload);
         f.seq = seq;
-        let got = decode(&sim::apply(&modem::encode_frame(&f, id), &Channel::default()));
+        let got = decode(&sim::apply(&modem::encode_frame(&f, id, Band::Mid), &Channel::default()));
         prop_assert_eq!(got, vec![f]);
     }
 
@@ -43,7 +43,7 @@ proptest! {
                             snr in -12.0f32..6.0, dropouts in 0u32..4) {
         let f = Frame::new(FrameType::Data, 7, 9, payload);
         let ch = Channel { seed, white_snr_db: Some(snr), dropouts, dropout_ms: 80.0, ..Default::default() };
-        for g in decode(&sim::apply(&modem::encode_frame(&f, id), &ch)) {
+        for g in decode(&sim::apply(&modem::encode_frame(&f, id, Band::Mid), &ch)) {
             prop_assert_eq!(&g, &f);
         }
     }
@@ -51,7 +51,7 @@ proptest! {
     /// Property 5: the simulator is deterministic.
     #[test]
     fn simulator_deterministic(seed: u64, snr in -5.0f32..20.0) {
-        let s = modem::encode_frame(&Frame::new(FrameType::Ack, 1, 2, vec![1, 2, 3]), ProfileId::Banshee);
+        let s = modem::encode_frame(&Frame::new(FrameType::Ack, 1, 2, vec![1, 2, 3]), ProfileId::Banshee, Band::Mid);
         let ch = Channel { seed, white_snr_db: Some(snr), babble_snr_db: Some(snr), reverb_rt60_ms: Some(200.0), drift_ppm: 80.0, dropouts: 1, ..Default::default() };
         prop_assert_eq!(sim::apply(&s, &ch), sim::apply(&s, &ch));
     }

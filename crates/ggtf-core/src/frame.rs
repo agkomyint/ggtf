@@ -17,7 +17,8 @@ pub const HEADER_FIELDS: usize = 9;
 pub const HEADER_DATA_LEN: usize = HEADER_FIELDS + 2;
 pub const HEADER_PARITY: usize = 8;
 pub const HEADER_CW_LEN: usize = HEADER_DATA_LEN + HEADER_PARITY;
-pub const MAX_PAYLOAD: usize = 96;
+/// Largest payload. Kept so payload + CRC + parity fits in one 255-byte Reed-Solomon codeword.
+pub const MAX_PAYLOAD: usize = 200;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrameType {
@@ -29,6 +30,8 @@ pub enum FrameType {
     Data = 6,
     Ack = 7,
     Bye = 8,
+    /// Connectionless broadcast chunk ("haunted QR").
+    Beam = 9,
 }
 
 impl FrameType {
@@ -42,6 +45,7 @@ impl FrameType {
             6 => Self::Data,
             7 => Self::Ack,
             8 => Self::Bye,
+            9 => Self::Beam,
             _ => return None,
         })
     }
@@ -56,6 +60,7 @@ impl FrameType {
             Self::Data => "DATA",
             Self::Ack => "ACK",
             Self::Bye => "BYE",
+            Self::Beam => "BEAM",
         }
     }
 }
