@@ -24,6 +24,39 @@ Each station ignores its own echo, so both tabs can share one speaker and one mi
 
 Some laptops cancel their own speaker in the microphone driver (Intel Smart Sound, Realtek, ASUS AI noise cancelling, NVIDIA Broadcast). If the other tab never shows **Incoming call**, turn those off, or use a laptop and a phone. `bun scripts/mic-check.ts --band=mid` measures whether your mic hears your speaker.
 
+## Séance OS: apps that travel through sound
+
+Write a small app ("spirit") in the browser, share it with everyone nearby over sound, and play it together with no server.
+
+- **`/studio`** (Spirit Studio): CodeMirror editor for `spirit.json`, `index.html`, `app.js` and `style.css`, with four templates: Fortune Teller (offline), Ghost Grid (two-player game), Spirit Board (shared notes) and Ghost Wiki (GGTP search). Spirits for two devices run as two previews, A and B, connected either instantly or over **sim air**: two real Rust stations in a worker, with adjustable noise and dropouts. There are Console, Network (every GGTP message, optionally with radio frames), GhostDB (both copies) and Budget (signed size, sharing time) panels. **Publish** signs the spirit with this browser's Ed25519 author key. On a phone, the layout switches to Code, Preview and Panels tabs.
+- **`/seance`** (Séance OS): a library of spirits that open offline. **Share over sound** beams the signed bundle. On **Receive**, a device verifies the signature and shows an install screen with the author's 4 words, who shared it, the permissions and any update or lookalike warnings. Anyone can pass a spirit on unchanged. **Play together** calls with the spirit's app id. The other device's prompt names the spirit, both sides compare the pairing words, and a HELLO check makes sure both run identical code.
+- **`/docs`**: the spirit SDK (`spirit.peer`, `spirit.db`, `spirit.ggtp`, `spirit.serve`), GGTP, GhostDB, the bundle format and the security model.
+
+Under the hood:
+
+- **GGTP** is a CoAP-style protocol with a 5-byte header: GET, POST, PUT, DELETE and WATCH, plus status codes, tokens, notifications and peer messages. Either device can serve.
+- **GhostDB** is a key-value store per spirit. It resolves conflicts last-writer-wins using Lamport clocks, syncs only the changes since the last sync with that peer, keeps tombstones so deletes sync, and never shares keys that start with `local:`.
+- **Sandbox:** spirits run in an `allow-scripts allow-forms` iframe with an opaque origin. A CSP blocks fetch, form posts and external resources.
+- **Link upgrades:**
+  - binary messages up to 12 KB
+  - fragments sized by profile (56–176 B) that shrink after retries
+  - ACKs that ride inside replies
+  - retry timers that wait while a frame is arriving, with random backoff
+  - a keep-alive every 45 s
+  - CALL tags
+
+Measured results:
+
+| Test | Result |
+|---|---|
+| 5 KB message over simulated air | 43.8 B/s (the old chat ran at about 17 B/s) |
+| Sharing Ghost Grid (1,214 B) over real speaker and mic | 28 s |
+| From Play together to playing | 28 s |
+| One move crossing the room | 1.2 s |
+| The reply move coming back | 1.8 s |
+
+To check everything in Chrome, run `bun scripts/seance-check.ts http://localhost:3210`. Add `--air` to also share and play over the real speaker and mic.
+
 ## Haunted QR: replace a QR code with sound
 
 `/beam` broadcasts a link, a note or a Wi-Fi login to every device in the room. Nobody pairs and nobody needs a camera.

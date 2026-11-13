@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { Check, Copy, Download, ExternalLink, Gauge, ImageIcon, Mic, Radio, RadioTower, Square, Volume2, Wifi } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -70,6 +71,16 @@ function Received({ text, b64 }: { text: string; b64: string }) {
   }
   const wifi = parseWifi(text);
   const link = safeLink(text);
+  if (b64.startsWith("AEdTAQ")) {
+    return (
+      <div className="space-y-2">
+        <p className="font-medium">A Séance OS spirit (an app sent over sound).</p>
+        <Link href="/seance" className={buttonVariants({ size: "sm" })}>
+          Open Séance OS to install it
+        </Link>
+      </div>
+    );
+  }
   if (wifi) {
     return (
       <div className="space-y-2">
@@ -102,7 +113,7 @@ function Received({ text, b64 }: { text: string; b64: string }) {
 }
 
 /** One square per chunk: lit once that chunk has been heard. */
-function ChunkMap({ got }: { got: string }) {
+export function ChunkMap({ got }: { got: string }) {
   return (
     <div className="flex flex-wrap gap-1" aria-label={`${[...got].filter((c) => c === "1").length} of ${got.length} chunks received`}>
       {[...got].map((c, i) => (

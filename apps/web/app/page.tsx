@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AudioWaveform, Cpu, FlaskConical, KeyRound, Laptop, Radio, ShieldCheck, Speaker } from "lucide-react";
+import { AudioWaveform, Cpu, FlaskConical, KeyRound, Laptop, Radio, ShieldCheck, Speaker, Wand2 } from "lucide-react";
 import { GhostSvg } from "@/components/ggtf/ghost";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,6 +52,31 @@ export default function Home() {
             </CardHeader>
           </Card>
         ))}
+      </section>
+
+      <section className="pb-12">
+        <Card className="glow-box">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 font-display text-3xl text-primary">
+              <Wand2 className="size-6" /> Séance OS: apps that travel through sound
+            </CardTitle>
+            <CardDescription>
+              Write a small app in the browser, share it to everyone nearby over sound, and play it together with no server. Anyone who receives it can pass it on; the
+              author&apos;s signature proves nobody changed it. Apps talk over GGTP and keep data in GhostDB, which syncs between devices.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-3">
+            <Link href="/studio" className={buttonVariants()}>
+              Build a spirit
+            </Link>
+            <Link href="/seance" className={buttonVariants({ variant: "outline" })}>
+              Open Séance OS
+            </Link>
+            <Link href="/docs" className={buttonVariants({ variant: "ghost" })}>
+              Read the SDK docs
+            </Link>
+          </CardContent>
+        </Card>
       </section>
 
       <section className="pb-12">

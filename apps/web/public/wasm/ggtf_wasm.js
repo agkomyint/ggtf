@@ -1,5 +1,130 @@
 /* @ts-self-types="./ggtf_wasm.d.ts" */
 
+/**
+ * Two real stations on simulated air. Events come back tagged with `side` 0 (A) or 1 (B).
+ */
+export class WasmDuo {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        WasmDuoFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_wasmduo_free(ptr, 0);
+    }
+    /**
+     * Station A calls B; both sides confirm automatically.
+     */
+    connect() {
+        wasm.wasmduo_connect(this.__wbg_ptr);
+    }
+    /**
+     * @param {number} side
+     */
+    hangup(side) {
+        wasm.wasmduo_hangup(this.__wbg_ptr, side);
+    }
+    /**
+     * @param {number} side
+     * @returns {string}
+     */
+    link(side) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.wasmduo_link(this.__wbg_ptr, side);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @param {number} seed
+     */
+    constructor(seed) {
+        const ret = wasm.wasmduo_new(seed);
+        this.__wbg_ptr = ret;
+        WasmDuoFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @returns {number}
+     */
+    now() {
+        const ret = wasm.wasmduo_now(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Advances simulated time by `ms`.
+     * @param {number} ms
+     */
+    run(ms) {
+        wasm.wasmduo_run(this.__wbg_ptr, ms);
+    }
+    /**
+     * @param {number} side
+     * @param {number} kind
+     * @param {Uint8Array | number[]} data
+     * @returns {number}
+     */
+    send(side, kind, data) {
+        const val2 = +side;
+        const val3 = +kind;
+        const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmduo_send(this.__wbg_ptr, val2, val3, ptr0, len0);
+        return ret;
+    }
+    /**
+     * @param {number} p
+     */
+    set_loss(p) {
+        wasm.wasmduo_set_loss(this.__wbg_ptr, p);
+    }
+    /**
+     * @param {number} sigma
+     */
+    set_noise(sigma) {
+        wasm.wasmduo_set_noise(this.__wbg_ptr, sigma);
+    }
+    /**
+     * @param {number} side
+     * @returns {string}
+     */
+    state(side) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.wasmduo_state(this.__wbg_ptr, side);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {string}
+     */
+    take_events() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.wasmduo_take_events(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+}
+if (Symbol.dispose) WasmDuo.prototype[Symbol.dispose] = WasmDuo.prototype.free;
+
 export class WasmStation {
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
@@ -66,6 +191,17 @@ export class WasmStation {
         wasm.wasmstation_call(this.__wbg_ptr, now);
     }
     /**
+     * Calls with a tag (up to 16 bytes) that the answerer sees with the incoming call.
+     * @param {Uint8Array | number[]} tag
+     * @param {number} now
+     */
+    call_tagged(tag, now) {
+        const val2 = +now;
+        const ptr0 = passArray8ToWasm0(tag, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.wasmstation_call_tagged(this.__wbg_ptr, ptr0, len0, val2);
+    }
+    /**
      * @param {number} now
      */
     confirm(now) {
@@ -127,6 +263,21 @@ export class WasmStation {
         wasm.wasmstation_reject(this.__wbg_ptr, now);
     }
     /**
+     * Sends a binary message (kind 0 text, 1 GGTP). Returns the message id, or -1.
+     * @param {number} kind
+     * @param {Uint8Array | number[]} data
+     * @param {number} now
+     * @returns {number}
+     */
+    send_bytes(kind, data, now) {
+        const val2 = +kind;
+        const val3 = +now;
+        const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmstation_send_bytes(this.__wbg_ptr, val2, ptr0, len0, val3);
+        return ret;
+    }
+    /**
      * Returns the message id, or -1 when the link isn't connected.
      * @param {string} text
      * @param {number} now
@@ -151,6 +302,13 @@ export class WasmStation {
      */
     set_band(b) {
         wasm.wasmstation_set_band(this.__wbg_ptr, b);
+    }
+    /**
+     * Keep-alive interval in ms while connected and idle; 0 turns it off.
+     * @param {number} ms
+     */
+    set_keepalive(ms) {
+        wasm.wasmstation_set_keepalive(this.__wbg_ptr, ms);
     }
     /**
      * Turns the ML symbol decoder on or off. Returns whether ML is now active.
@@ -205,6 +363,40 @@ export class WasmStation {
     }
 }
 if (Symbol.dispose) WasmStation.prototype[Symbol.dispose] = WasmStation.prototype.free;
+
+/**
+ * Public key (32 bytes) for a 32-byte author secret. Empty if the secret has the wrong length.
+ * @param {Uint8Array | number[]} secret
+ * @returns {Uint8Array}
+ */
+export function author_public(secret) {
+    const ptr0 = passArray8ToWasm0(secret, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.author_public(ptr0, len0);
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
+ * The 4 author words for a public key, as a JSON array.
+ * @param {Uint8Array | number[]} _public
+ * @returns {string}
+ */
+export function author_words(_public) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passArray8ToWasm0(_public, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.author_words(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
 
 /**
  * @returns {string}
@@ -271,6 +463,61 @@ export function bench_sample(scenario_index, profile_id, band_id, payload_len, s
     var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v1;
+}
+
+/**
+ * Verifies and unpacks a bundle: `{ok, error?, author, words, hash, source, bytes}`.
+ * @param {Uint8Array | number[]} data
+ * @returns {string}
+ */
+export function bundle_open(data) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.bundle_open(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * Compresses and signs a spirit source. Empty on failure (bad secret, source over 256 KB).
+ * @param {Uint8Array | number[]} secret
+ * @param {string} source
+ * @returns {Uint8Array}
+ */
+export function bundle_pack(secret, source) {
+    let ptr0, len0, ptr1, len1;
+    try {
+        ptr0 = passArray8ToWasm0(secret, wasm.__wbindgen_malloc);
+        len0 = WASM_VECTOR_LEN;
+        ptr1 = passStringToWasm0(source, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len1 = WASM_VECTOR_LEN;
+    } catch (e) {
+        if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+        if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 1, 1); }
+        throw e;
+    }
+    const ret = wasm.bundle_pack(ptr0, len0, ptr1, len1);
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
+}
+
+/**
+ * @param {Uint8Array | number[]} data
+ * @returns {boolean}
+ */
+export function is_bundle(data) {
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.is_bundle(ptr0, len0);
+    return ret !== 0;
 }
 
 /**
@@ -425,6 +672,9 @@ function __wbg_get_imports() {
     };
 }
 
+const WasmDuoFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_wasmduo_free(ptr, 1));
 const WasmStationFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wasmstation_free(ptr, 1));

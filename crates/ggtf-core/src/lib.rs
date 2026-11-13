@@ -5,8 +5,10 @@
 
 pub mod beam;
 pub mod bench;
+pub mod bundle;
 pub mod crypto;
 pub mod dsp;
+pub mod duo;
 pub mod fec;
 pub mod frame;
 pub mod link;

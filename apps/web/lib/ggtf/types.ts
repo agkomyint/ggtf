@@ -8,7 +8,7 @@ export type LinkStateName =
   | "connected"
   | "closing";
 
-export type ProfileName = "wraith" | "specter" | "banshee";
+export type ProfileName = "wraith" | "specter" | "banshee" | "poltergeist";
 export type MsgStatusName = "queued" | "sending" | "delivered" | "failed";
 
 export type StationEvent =
@@ -17,11 +17,12 @@ export type StationEvent =
   | { type: "peer_confirmed" }
   | { type: "trained"; mask: number; profile: ProfileName }
   | { type: "msg_status"; id: number; status: MsgStatusName }
-  | { type: "msg_rx"; text: string }
+  | { type: "msg_rx"; kind: number; text: string; b64: string; bytes: number }
   | { type: "retry"; what: string; attempt: number; profile: ProfileName }
   | { type: "log"; text: string }
   | { type: "ended"; reason: string }
-  | { type: "incoming"; from: number }
+  | { type: "incoming"; from: number; tag: string }
+  | { type: "answering"; from: number; tag: string }
   | { type: "incoming_gone" }
   | { type: "beam_progress"; id: number; from: number; have: number; count: number; got: string }
   | { type: "beam_rx"; id: number; from: number; text: string; b64: string; bytes: number }
@@ -49,6 +50,19 @@ export interface StationStats {
   beaming?: boolean;
   decoder?: string;
   band?: string;
+  link?: LinkInfo;
+}
+
+/** Link-layer details from the Rust link (fragment size adapts to the profile and retries). */
+export interface LinkInfo {
+  frag: number;
+  frag_limit: number;
+  acks: number;
+  piggybacked: number;
+  pings: number;
+  backlog: number;
+  state: LinkStateName;
+  profile: ProfileName;
 }
 
 export interface ProfileInfo {

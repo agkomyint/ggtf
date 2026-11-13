@@ -8,10 +8,15 @@
 //!   KEY (profile, pubkey) ->
 //!                         <-     KEY (pubkey)
 //!   both show 4 SAS words; users confirm
-//!   DATA[CONFIRM] / ACK, then DATA[TEXT] / ACK, encrypted and authenticated
+//!   DATA[CONFIRM] / ACK, then DATA[MSG] / ACK, encrypted and authenticated
 //!
 //! Reliable frames use stop-and-wait ARQ. ACKs carry an AEAD tag so they can't be forged,
-//! and they're sent in the same profile as the frame they answer.
+//! and they're sent in the same profile as the frame they answer. When the receiver has its
+//! own data ready within `ACK_DELAY_MS`, the ACK rides inside that DATA frame instead
+//! (the header's `ack` and `flags` are part of the DATA frame's authenticated data).
+//!
+//! Messages are binary and tagged with a kind (0 = chat text, 1 = GGTP). They are cut into
+//! fragments only when sent, sized by the current profile and recent retries.
 
 use crate::crypto::{self, KeyPair, SessionKeys, KIND_ACK, KIND_DATA};
 use crate::frame::{Frame, FrameType, BROADCAST};
@@ -24,13 +29,40 @@ pub const MAX_CALL_ATTEMPTS: u32 = 8;
 pub const MAX_RETRIES: u32 = 4;
 pub const IDLE_TIMEOUT_MS: f64 = 180_000.0;
 pub const REPLY_MARGIN_MS: f64 = 2500.0;
-pub const MAX_FRAG: usize = 60;
-pub const MAX_MESSAGE: usize = 1000;
+/// Largest message, in bytes.
+pub const MAX_MESSAGE: usize = 12_000;
+/// Largest fragment: 176 + 6 inner header + 16 tag = 198, under the 200-byte frame limit.
+pub const MAX_FRAG: usize = 176;
+pub const MIN_FRAG: usize = 32;
+/// Send a keep-alive after this long without hearing the peer (plus 0–8 s of per-session jitter).
+pub const KEEPALIVE_MS: f64 = 45_000.0;
+/// How long the receiver of a DATA frame waits for its own data to piggyback the ACK on.
+pub const ACK_DELAY_MS: f64 = 350.0;
+/// Largest tag carried in a CALL frame.
+pub const MAX_TAG: usize = 16;
+/// DATA header flag: `ack` holds a piggybacked acknowledgement.
+pub const FLAG_ACK: u8 = 0x01;
 const TRAIN_LEN: usize = 24;
+const FRAG_HEADER: usize = 6;
+
+/// Message kinds.
+pub const KIND_TEXT: u8 = 0;
+pub const KIND_GGTP: u8 = 1;
 
 const INNER_CONFIRM: u8 = 0;
-const INNER_TEXT: u8 = 1;
+const INNER_MSG: u8 = 1;
 const INNER_BYE: u8 = 2;
+const INNER_PING: u8 = 3;
+
+/// Fragment size for a profile before retry-based shrinking: slow profiles get short frames,
+/// so one burst of noise costs less airtime to resend.
+pub fn frag_base(p: ProfileId) -> usize {
+    match p {
+        ProfileId::Wraith => 56,
+        ProfileId::Specter => 120,
+        ProfileId::Banshee | ProfileId::Poltergeist => MAX_FRAG,
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LinkState {
@@ -91,12 +123,14 @@ pub enum LinkEvent {
     PeerConfirmed,
     Trained { mask: u8, profile: ProfileId },
     MsgStatus { id: u32, status: MsgStatus },
-    MsgReceived { text: Vec<u8> },
+    MsgReceived { kind: u8, data: Vec<u8> },
     Retry { what: &'static str, attempt: u32, profile: ProfileId },
     Log { text: String },
     Ended { reason: String },
     /// Someone is calling and auto-answer is off. Call `accept` to pick up.
-    Incoming { from: u16 },
+    Incoming { from: u16, tag: Vec<u8> },
+    /// This station is answering a call (by accept or auto-answer), with the caller's tag.
+    Answering { from: u16, tag: Vec<u8> },
     /// The pending incoming call went away (caller stopped, or it was declined/answered).
     IncomingGone,
 }
@@ -120,10 +154,20 @@ pub struct TxRequest {
     close_after: bool,
 }
 
-struct Pending {
-    plaintext: Vec<u8>,
-    msg_id: Option<u32>,
-    last: bool,
+enum Pending {
+    /// A single-frame control message (confirm, bye, ping).
+    Control(Vec<u8>),
+    /// A message still being cut into fragments.
+    Msg { id: u32, kind: u8, data: Vec<u8>, sent: usize, frag: u16 },
+}
+
+impl Pending {
+    fn msg_id(&self) -> Option<u32> {
+        match self {
+            Pending::Control(_) => None,
+            Pending::Msg { id, .. } => Some(*id),
+        }
+    }
 }
 
 struct InFlight {
@@ -132,6 +176,15 @@ struct InFlight {
     msg_id: Option<u32>,
     last: bool,
     bye: bool,
+}
+
+/// Link-level counters, for the UI and tests.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LinkStats {
+    pub acks_sent: u32,
+    pub acks_piggybacked: u32,
+    pub pings: u32,
+    pub frag_limit: usize,
 }
 
 pub struct Link {
@@ -162,12 +215,26 @@ pub struct Link {
     tx_counter: u64,
     rx_counter: u64,
     reasm: Vec<u8>,
+    /// (message id, kind, next fragment index) of the message being reassembled.
+    reasm_at: Option<(u8, u8, u16)>,
     next_msg_id: u32,
     local_confirmed: bool,
     peer_confirmed: bool,
     last_rx: f64,
-    /// Most recent caller heard while idle with auto-answer off: (station, time heard).
-    incoming: Option<(u16, f64, Band)>,
+    /// Most recent caller heard while idle with auto-answer off: (station, time heard, band, tag).
+    incoming: Option<(u16, f64, Band, Vec<u8>)>,
+    /// Tag sent in our CALL frames.
+    call_tag: Vec<u8>,
+    /// Tag the caller sent, when we answered.
+    peer_tag: Vec<u8>,
+    /// ACK we owe the peer, held back briefly so it can ride on our own DATA: (counter, profile, due).
+    ack_due: Option<(u64, ProfileId, f64)>,
+    /// Upper bound on fragment size, adjusted by retries.
+    frag_limit: usize,
+    clean_streak: u32,
+    keepalive_ms: f64,
+    keepalive_jitter: f64,
+    pub link_stats: LinkStats,
 }
 
 /// How long an unanswered incoming call stays acceptable after its last CALL frame.
@@ -175,6 +242,11 @@ pub const INCOMING_TTL_MS: f64 = 12_000.0;
 
 fn aad(f: &Frame, field: u8) -> [u8; 6] {
     [f.ftype as u8, (f.src >> 8) as u8, f.src as u8, (f.dst >> 8) as u8, f.dst as u8, field]
+}
+
+/// DATA frames also authenticate `ack` and `flags`, so a piggybacked ACK can't be forged or stripped.
+fn aad_data(f: &Frame) -> [u8; 8] {
+    [f.ftype as u8, (f.src >> 8) as u8, f.src as u8, (f.dst >> 8) as u8, f.dst as u8, f.seq, f.ack, f.flags]
 }
 
 fn train_payload(idx: u8, count: u8) -> Vec<u8> {
@@ -210,16 +282,40 @@ impl Link {
             tx_counter: 0,
             rx_counter: 0,
             reasm: Vec::new(),
+            reasm_at: None,
             next_msg_id: 1,
             local_confirmed: false,
             peer_confirmed: false,
             last_rx: 0.0,
             incoming: None,
+            call_tag: Vec::new(),
+            peer_tag: Vec::new(),
+            ack_due: None,
+            frag_limit: MAX_FRAG,
+            clean_streak: 0,
+            keepalive_ms: KEEPALIVE_MS,
+            keepalive_jitter: 0.0,
+            link_stats: LinkStats { frag_limit: MAX_FRAG, ..LinkStats::default() },
         }
     }
 
     pub fn incoming(&self) -> Option<u16> {
-        self.incoming.map(|(id, _, _)| id)
+        self.incoming.as_ref().map(|(id, ..)| *id)
+    }
+
+    /// Tag the caller attached to the current session (empty if none, or if we called).
+    pub fn peer_tag(&self) -> &[u8] {
+        &self.peer_tag
+    }
+
+    /// Keep-alive interval while connected and idle; 0 turns keep-alives off.
+    pub fn set_keepalive(&mut self, ms: f64) {
+        self.keepalive_ms = ms.max(0.0);
+    }
+
+    /// Fragment size the next DATA frame would use.
+    pub fn frag_size(&self) -> usize {
+        frag_base(self.profile).min(self.frag_limit)
     }
 
     pub fn band(&self) -> Band {
@@ -237,8 +333,8 @@ impl Link {
     /// Picks up the pending incoming call, if it is still fresh.
     pub fn accept(&mut self, now: f64) -> bool {
         match self.incoming.take() {
-            Some((from, at, band)) if self.state == LinkState::Idle && now - at <= INCOMING_TTL_MS => {
-                self.answer_call(from, band, now);
+            Some((from, at, band, tag)) if self.state == LinkState::Idle && now - at <= INCOMING_TTL_MS => {
+                self.answer_call(from, band, tag, now);
                 true
             }
             _ => false,
@@ -251,7 +347,7 @@ impl Link {
         }
     }
 
-    fn answer_call(&mut self, from: u16, band: Band, now: f64) {
+    fn answer_call(&mut self, from: u16, band: Band, tag: Vec<u8>, now: f64) {
         self.reset_session();
         self.band = band;
         if self.incoming.take().is_some() {
@@ -259,6 +355,8 @@ impl Link {
         }
         self.role = Some(Role::Answerer);
         self.peer = Some(from);
+        self.peer_tag = tag.clone();
+        self.events.push(LinkEvent::Answering { from, tag });
         self.last_rx = now;
         self.attempts = 1;
         self.set_state(LinkState::Ringing);
@@ -344,13 +442,20 @@ impl Link {
         self.tx_counter = 0;
         self.rx_counter = 0;
         self.reasm.clear();
+        self.reasm_at = None;
         self.local_confirmed = false;
         self.peer_confirmed = false;
+        self.peer_tag.clear();
+        self.ack_due = None;
+        self.frag_limit = MAX_FRAG;
+        self.clean_streak = 0;
+        self.keepalive_jitter = self.rng.range(0.0, 8000.0);
+        self.link_stats = LinkStats { frag_limit: MAX_FRAG, ..LinkStats::default() };
     }
 
     fn end(&mut self, reason: impl Into<String>) {
         let mut failed: Vec<u32> = self.in_flight.iter().filter_map(|f| f.msg_id).collect();
-        failed.extend(self.outbox.iter().filter_map(|p| p.msg_id));
+        failed.extend(self.outbox.iter().filter_map(Pending::msg_id));
         failed.dedup();
         for id in failed {
             self.events.push(LinkEvent::MsgStatus { id, status: MsgStatus::Failed });
@@ -367,11 +472,17 @@ impl Link {
     }
 
     pub fn call(&mut self, now: f64) {
+        self.call_tagged(now, &[]);
+    }
+
+    /// Calls with a tag (up to `MAX_TAG` bytes) that the answerer sees with the incoming call.
+    pub fn call_tagged(&mut self, now: f64, tag: &[u8]) {
         if self.state != LinkState::Idle {
             return;
         }
         self.reset_session();
         self.decline();
+        self.call_tag = tag[..tag.len().min(MAX_TAG)].to_vec();
         self.role = Some(Role::Caller);
         self.last_rx = now;
         self.attempts = 1;
@@ -384,7 +495,7 @@ impl Link {
             return;
         }
         self.local_confirmed = true;
-        self.queue_reliable(vec![INNER_CONFIRM], None, true);
+        self.queue_reliable(vec![INNER_CONFIRM]);
         if self.peer_confirmed {
             self.set_state(LinkState::Connected);
         } else {
@@ -400,35 +511,40 @@ impl Link {
         match self.state {
             LinkState::Idle => {}
             LinkState::AwaitingConfirm | LinkState::Connected if self.keys.is_some() => {
-                let pending: Vec<u32> = self.outbox.iter().filter_map(|p| p.msg_id).collect();
+                let pending: Vec<u32> = self.outbox.iter().filter_map(Pending::msg_id).collect();
                 for id in pending {
                     self.events.push(LinkEvent::MsgStatus { id, status: MsgStatus::Failed });
                 }
                 self.outbox.clear();
-                self.queue_reliable(vec![INNER_BYE], None, true);
+                self.queue_reliable(vec![INNER_BYE]);
                 self.set_state(LinkState::Closing);
             }
             _ => self.end("hung up"),
         }
     }
 
-    /// Queues a text message. Returns its id, or None when not connected.
+    /// Queues a text message (kind 0). Returns its id, or None when not connected.
     pub fn send_text(&mut self, text: &[u8]) -> Option<u32> {
-        if self.state != LinkState::Connected || text.is_empty() || text.len() > MAX_MESSAGE {
+        self.send_msg(KIND_TEXT, text)
+    }
+
+    /// Queues a binary message of the given kind. Returns its id, or None when not connected
+    /// or when the message is empty or longer than `MAX_MESSAGE`.
+    pub fn send_msg(&mut self, kind: u8, data: &[u8]) -> Option<u32> {
+        if self.state != LinkState::Connected || data.is_empty() || data.len() > MAX_MESSAGE {
             return None;
         }
         let id = self.next_msg_id;
         self.next_msg_id += 1;
         self.events.push(LinkEvent::MsgStatus { id, status: MsgStatus::Queued });
-        let chunks: Vec<&[u8]> = text.chunks(MAX_FRAG).collect();
-        let count = chunks.len() as u8;
-        for (i, c) in chunks.iter().enumerate() {
-            let mut pt = vec![INNER_TEXT, id as u8, i as u8, count];
-            pt.extend_from_slice(c);
-            self.outbox.push_back(Pending { plaintext: pt, msg_id: Some(id), last: i + 1 == chunks.len() });
-        }
+        self.outbox.push_back(Pending::Msg { id, kind, data: data.to_vec(), sent: 0, frag: 0 });
         self.pump();
         Some(id)
+    }
+
+    /// Messages waiting to be sent, plus the one in flight.
+    pub fn backlog(&self) -> usize {
+        self.outbox.len() + self.in_flight.is_some() as usize
     }
 
     // ---------- transmit side ----------
@@ -445,7 +561,10 @@ impl Link {
     pub fn tx_done(&mut self, now: f64) {
         let Some((expect, close)) = self.transmitting.take() else { return };
         if let Some(e) = expect {
-            let t = now + self.reply_ms(e) + REPLY_MARGIN_MS + self.rng.range(0.0, 1200.0);
+            // Random backoff that grows with each attempt, so two stations that collided
+            // don't resend in step and collide again.
+            let spread = 1200.0 * self.attempts.clamp(1, 3) as f64;
+            let t = now + self.reply_ms(e) + REPLY_MARGIN_MS + self.rng.range(0.0, spread);
             self.timer = Some((t, e));
         }
         if close {
@@ -459,7 +578,7 @@ impl Link {
 
     fn send_call(&mut self) {
         self.drop_queued(FrameType::Call);
-        let f = Frame::new(FrameType::Call, self.id, BROADCAST, vec![]);
+        let f = Frame::new(FrameType::Call, self.id, BROADCAST, self.call_tag.clone());
         self.enqueue(f, ProfileId::Wraith, Some(Expect::Answer), false);
     }
 
@@ -503,28 +622,57 @@ impl Link {
         self.enqueue(f, self.profile, None, true);
     }
 
-    fn queue_reliable(&mut self, pt: Vec<u8>, msg_id: Option<u32>, last: bool) {
-        self.outbox.push_back(Pending { plaintext: pt, msg_id, last });
+    fn queue_reliable(&mut self, pt: Vec<u8>) {
+        self.outbox.push_back(Pending::Control(pt));
         self.pump();
     }
 
+    /// Takes the next plaintext to send: a control message, or the next fragment of a message.
+    /// Returns (plaintext, message id, last fragment of its message).
+    fn next_plaintext(&mut self) -> Option<(Vec<u8>, Option<u32>, bool)> {
+        let size = self.frag_size();
+        let front = self.outbox.front_mut()?;
+        let out = match front {
+            Pending::Control(pt) => (std::mem::take(pt), None, true),
+            Pending::Msg { id, kind, data, sent, frag } => {
+                let end = (*sent + size).min(data.len());
+                let last = end == data.len();
+                let mut pt = Vec::with_capacity(FRAG_HEADER + end - *sent);
+                pt.extend_from_slice(&[INNER_MSG, *kind, *id as u8, (*frag >> 8) as u8, *frag as u8, last as u8]);
+                pt.extend_from_slice(&data[*sent..end]);
+                if *frag == 0 {
+                    self.events.push(LinkEvent::MsgStatus { id: *id, status: MsgStatus::Sending });
+                }
+                let id = *id;
+                *sent = end;
+                *frag += 1;
+                (pt, Some(id), last)
+            }
+        };
+        if out.2 {
+            self.outbox.pop_front();
+        }
+        Some(out)
+    }
+
     fn pump(&mut self) {
-        if self.in_flight.is_some() {
+        if self.in_flight.is_some() || self.keys.is_none() || self.outbox.is_empty() {
             return;
         }
-        let Some(keys) = self.keys.as_ref() else { return };
-        let Some(p) = self.outbox.pop_front() else { return };
+        let Some((plaintext, msg_id, last)) = self.next_plaintext() else { return };
+        let keys = self.keys.as_ref().unwrap();
         let counter = self.tx_counter;
         let mut f = self.frame(FrameType::Data, vec![]);
         f.seq = counter as u8;
-        f.payload = crypto::seal(&keys.tx, KIND_DATA, counter, &aad(&f, f.seq), &p.plaintext);
-        if let Some(id) = p.msg_id {
-            if p.plaintext.get(2) == Some(&0) {
-                self.events.push(LinkEvent::MsgStatus { id, status: MsgStatus::Sending });
-            }
+        if let Some((ack, _, _)) = self.ack_due.take() {
+            // Our data is ready before the ACK timer: the ACK rides along.
+            f.ack = ack as u8;
+            f.flags |= FLAG_ACK;
+            self.link_stats.acks_piggybacked += 1;
         }
-        let bye = p.plaintext.first() == Some(&INNER_BYE);
-        self.in_flight = Some(InFlight { counter, frame: f.clone(), msg_id: p.msg_id, last: p.last, bye });
+        f.payload = crypto::seal(&keys.tx, KIND_DATA, counter, &aad_data(&f), &plaintext);
+        let bye = plaintext.first() == Some(&INNER_BYE);
+        self.in_flight = Some(InFlight { counter, frame: f.clone(), msg_id, last, bye });
         self.attempts = 1;
         self.enqueue(f, self.profile, Some(Expect::Ack), false);
     }
@@ -535,7 +683,19 @@ impl Link {
         f.ack = counter as u8;
         f.payload = crypto::seal(&keys.tx, KIND_ACK, counter, &aad(&f, f.ack), &[]);
         self.drop_queued(FrameType::Ack);
+        self.link_stats.acks_sent += 1;
         self.enqueue(f, profile, None, true);
+    }
+
+    /// While a receiver is in the middle of a frame, hold retry timers back: the frame may be
+    /// the reply we're waiting for, and resending over it would only collide. The hold ends at a
+    /// random point after the frame, so two stations hearing the same frame don't fire together.
+    pub fn defer_timers(&mut self, now: f64) {
+        if let Some((t, e)) = self.timer {
+            if t < now + 300.0 {
+                self.timer = Some((now + 300.0 + self.rng.range(0.0, 1500.0), e));
+            }
+        }
     }
 
     /// Bumps the attempt counter; past the retry limit, drops to a slower profile.
@@ -559,7 +719,7 @@ impl Link {
     // ---------- timers ----------
 
     pub fn tick(&mut self, now: f64) {
-        if let Some((_, at, _)) = self.incoming {
+        if let Some(&(_, at, _, _)) = self.incoming.as_ref() {
             if now - at > INCOMING_TTL_MS {
                 self.incoming = None;
                 self.events.push(LinkEvent::IncomingGone);
@@ -568,6 +728,22 @@ impl Link {
         if self.state != LinkState::Idle && now - self.last_rx > IDLE_TIMEOUT_MS {
             self.end("the line went dead (idle timeout)");
             return;
+        }
+        if let Some((c, p, due)) = self.ack_due {
+            if now >= due {
+                self.ack_due = None;
+                self.send_ack(c, p);
+            }
+        }
+        if self.state == LinkState::Connected
+            && self.keepalive_ms > 0.0
+            && self.backlog() == 0
+            && self.queue.is_empty()
+            && self.transmitting.is_none()
+            && now - self.last_rx > self.keepalive_ms + self.keepalive_jitter
+        {
+            self.link_stats.pings += 1;
+            self.queue_reliable(vec![INNER_PING]);
         }
         if let Some(d) = self.train_deadline {
             if now >= d {
@@ -686,7 +862,7 @@ impl Link {
                 self.on_key_as_answerer(f, rx_profile)
             }
             (FrameType::Key, LinkState::KeyExchange) if caller => self.on_key_as_caller(f),
-            (FrameType::Data, LinkState::AwaitingConfirm | LinkState::Connected | LinkState::Closing) => self.on_data(f, rx_profile),
+            (FrameType::Data, LinkState::AwaitingConfirm | LinkState::Connected | LinkState::Closing) => self.on_data(f, rx_profile, now),
             (FrameType::Ack, LinkState::AwaitingConfirm | LinkState::Connected | LinkState::Closing) => self.on_ack(f),
             (FrameType::Bye, _) if self.keys.is_none() => self.end("the other side hung up"),
             _ => {}
@@ -694,18 +870,19 @@ impl Link {
     }
 
     fn on_call(&mut self, f: &Frame, band: Band, now: f64) {
+        let tag = f.payload[..f.payload.len().min(MAX_TAG)].to_vec();
         if self.state == LinkState::Idle && self.answer_enabled {
-            self.answer_call(f.src, band, now);
+            self.answer_call(f.src, band, tag, now);
         } else if self.state == LinkState::Calling && self.role == Some(Role::Caller) && f.src != self.id && self.id < f.src {
             // Both sides pressed Call ("glare"): the lower station id gives way and answers.
             self.log(format!("both sides called at once; answering {:04X}", f.src));
-            self.answer_call(f.src, band, now);
+            self.answer_call(f.src, band, tag, now);
         } else if self.state == LinkState::Idle {
             // Announce once per caller; later CALL retries just keep it fresh.
-            let new = self.incoming.map(|(id, _, _)| id) != Some(f.src);
-            self.incoming = Some((f.src, now, band));
+            let new = self.incoming.as_ref().map(|(id, ..)| *id) != Some(f.src);
+            self.incoming = Some((f.src, now, band, tag.clone()));
             if new {
-                self.events.push(LinkEvent::Incoming { from: f.src });
+                self.events.push(LinkEvent::Incoming { from: f.src, tag });
             }
         } else if self.state == LinkState::Ringing && self.peer == Some(f.src) {
             self.last_rx = now;
@@ -785,20 +962,31 @@ impl Link {
         self.pump();
     }
 
-    fn on_data(&mut self, f: &Frame, rx_profile: ProfileId) {
+    fn on_data(&mut self, f: &Frame, rx_profile: ProfileId, now: f64) {
         let Some(keys) = self.keys.as_ref() else { return };
         if f.seq == self.rx_counter as u8 {
-            match crypto::open(&keys.rx, KIND_DATA, self.rx_counter, &aad(f, f.seq), &f.payload) {
+            match crypto::open(&keys.rx, KIND_DATA, self.rx_counter, &aad_data(f), &f.payload) {
                 Some(pt) => {
                     let c = self.rx_counter;
                     self.rx_counter += 1;
-                    self.send_ack(c, rx_profile);
+                    if pt.first() == Some(&INNER_BYE) {
+                        // Acknowledge at once: the close-after logic needs the ACK queued.
+                        self.ack_due = None;
+                        self.send_ack(c, rx_profile);
+                    } else {
+                        self.ack_due = Some((c, rx_profile, now + ACK_DELAY_MS));
+                    }
+                    if f.flags & FLAG_ACK != 0 {
+                        // Authenticated by the DATA tag above.
+                        self.ack_received(f.ack);
+                    }
                     self.handle_plain(pt);
                 }
                 None => self.log("dropped a DATA frame that failed authentication"),
             }
         } else if self.rx_counter > 0 && f.seq == (self.rx_counter - 1) as u8 {
-            // Our ACK was lost: acknowledge again, deliver nothing.
+            // Our ACK was lost (or is still waiting): acknowledge now, deliver nothing.
+            self.ack_due = None;
             self.send_ack(self.rx_counter - 1, rx_profile);
         }
     }
@@ -814,21 +1002,38 @@ impl Link {
                     }
                 }
             }
-            Some(INNER_TEXT) if pt.len() >= 4 => {
+            Some(INNER_MSG) if pt.len() >= FRAG_HEADER => {
                 if !(self.local_confirmed && self.peer_confirmed) {
                     self.log("dropped a message that arrived before pairing was confirmed");
                     return;
                 }
-                let (frag, count) = (pt[2], pt[3]);
+                let (kind, id, frag, last) = (pt[1], pt[2], u16::from_be_bytes([pt[3], pt[4]]), pt[5] & 1 != 0);
                 if frag == 0 {
                     self.reasm.clear();
+                    self.reasm_at = Some((id, kind, 0));
                 }
-                self.reasm.extend_from_slice(&pt[4..]);
-                if frag + 1 >= count {
-                    let text = std::mem::take(&mut self.reasm);
-                    self.events.push(LinkEvent::MsgReceived { text });
+                if self.reasm_at != Some((id, kind, frag)) {
+                    self.log("dropped a fragment out of order");
+                    self.reasm.clear();
+                    self.reasm_at = None;
+                    return;
+                }
+                self.reasm.extend_from_slice(&pt[FRAG_HEADER..]);
+                if self.reasm.len() > MAX_MESSAGE {
+                    self.log("dropped a message larger than the limit");
+                    self.reasm.clear();
+                    self.reasm_at = None;
+                    return;
+                }
+                if last {
+                    self.reasm_at = None;
+                    let data = std::mem::take(&mut self.reasm);
+                    self.events.push(LinkEvent::MsgReceived { kind, data });
+                } else {
+                    self.reasm_at = Some((id, kind, frag + 1));
                 }
             }
+            Some(INNER_PING) => {}
             Some(INNER_BYE) => {
                 self.set_state(LinkState::Closing);
                 if let Some(r) = self.queue.iter_mut().find(|r| r.frame.ftype == FrameType::Ack) {
@@ -850,12 +1055,32 @@ impl Link {
             self.log("ignored an ACK that failed authentication");
             return;
         }
+        self.ack_received(f.ack);
+    }
+
+    /// The peer acknowledged `ack` (already authenticated by the caller).
+    fn ack_received(&mut self, ack: u8) {
+        if self.in_flight.as_ref().map(|i| i.counter as u8) != Some(ack) {
+            return;
+        }
         let inf = self.in_flight.take().unwrap();
         if matches!(self.timer, Some((_, Expect::Ack))) {
             self.timer = None;
         }
         self.drop_queued(FrameType::Data);
         self.tx_counter += 1;
+        // Adapt the fragment size: halve after a hard-won frame, double after a clean run.
+        if self.attempts >= 3 {
+            self.frag_limit = (self.frag_size() / 2).max(MIN_FRAG);
+            self.clean_streak = 0;
+        } else if self.attempts <= 1 {
+            self.clean_streak += 1;
+            if self.clean_streak >= 4 && self.frag_limit < MAX_FRAG {
+                self.frag_limit = (self.frag_limit * 2).min(MAX_FRAG);
+                self.clean_streak = 0;
+            }
+        }
+        self.link_stats.frag_limit = self.frag_limit;
         self.attempts = 0;
         if inf.last {
             if let Some(id) = inf.msg_id {

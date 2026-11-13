@@ -29,6 +29,10 @@ export interface StationView {
   peerConfirmed: boolean;
   answer: boolean;
   incoming: number | null;
+  /** Hex tag the incoming caller attached (Séance OS puts the spirit's app id here). */
+  incomingTag: string;
+  /** Tag of the call we answered, for the session's lifetime. */
+  sessionTag: string;
   messages: ChatMessage[];
   log: LogLine[];
   stats: StationStats | null;
@@ -72,6 +76,8 @@ export function useStation() {
     peerConfirmed: false,
     answer: false,
     incoming: null,
+    incomingTag: "",
+    sessionTag: "",
     messages: [],
     log: [],
     stats: null,
@@ -96,6 +102,16 @@ export function useStation() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const logKey = useRef(0);
   const msgKey = useRef(0);
+  const listeners = useRef(new Set<(e: StationEvent) => void>());
+  const pendingSends = useRef(new Map<string, (id: number) => void>());
+
+  /** Raw station events for code that isn't React state (the Séance OS link transport). */
+  const subscribe = useCallback((fn: (e: StationEvent) => void) => {
+    listeners.current.add(fn);
+    return () => {
+      listeners.current.delete(fn);
+    };
+  }, []);
 
   useEffect(() => {
     installDiagHandlers();
@@ -117,6 +133,13 @@ export function useStation() {
 
   const handleEvent = useCallback(
     (e: StationEvent) => {
+      for (const fn of listeners.current) {
+        try {
+          fn(e);
+        } catch (err) {
+          console.error(err);
+        }
+      }
       switch (e.type) {
         case "state":
           setView((v) => ({
@@ -125,7 +148,7 @@ export function useStation() {
             role: e.role,
             peer: e.peer,
             profile: e.profile,
-            ...(e.state === "idle" ? { sas: null, localConfirmed: false, peerConfirmed: false } : { incoming: null }),
+            ...(e.state === "idle" ? { sas: null, localConfirmed: false, peerConfirmed: false, sessionTag: "" } : { incoming: null }),
           }));
           addLog(`state → ${e.state}${e.peer ? ` with ${stationLabel(e.peer)}` : ""}`, e.state === "connected" ? "good" : "info");
           if (e.state === "connected") toast.success("Connected through the dead air", { description: `Encrypted link, ${e.profile} profile` });
@@ -139,7 +162,7 @@ export function useStation() {
           addLog("the other side confirmed the words", "good");
           break;
         case "trained":
-          addLog(`line test passed for ${["wraith", "specter", "banshee"].filter((_, i) => e.mask & (1 << i)).join(", ") || "nothing"}; using ${e.profile}`, "good");
+          addLog(`line test passed for ${["wraith", "specter", "banshee", "poltergeist"].filter((_, i) => e.mask & (1 << i)).join(", ") || "nothing"}; using ${e.profile}`, "good");
           break;
         case "msg_status":
           setView((v) => ({
@@ -149,6 +172,10 @@ export function useStation() {
           if (e.status === "failed") toast.error("A message didn't make it across");
           break;
         case "msg_rx":
+          if (e.kind !== 0) {
+            addLog(`← message kind ${e.kind} (${e.bytes} bytes)`, "rx");
+            break;
+          }
           setView((v) => ({
             ...v,
             messages: [...v.messages, { key: `in-${msgKey.current++}`, id: null, dir: "in", text: e.text, status: "received", at: Date.now() }],
@@ -165,11 +192,14 @@ export function useStation() {
           toast(e.reason.charAt(0).toUpperCase() + e.reason.slice(1));
           break;
         case "incoming":
-          setView((v) => ({ ...v, incoming: e.from }));
-          addLog(`incoming call from ${stationLabel(e.from)}`, "good");
+          setView((v) => ({ ...v, incoming: e.from, incomingTag: e.tag }));
+          addLog(`incoming call from ${stationLabel(e.from)}${e.tag ? ` (tag ${e.tag})` : ""}`, "good");
+          break;
+        case "answering":
+          setView((v) => ({ ...v, sessionTag: e.tag }));
           break;
         case "incoming_gone":
-          setView((v) => ({ ...v, incoming: null }));
+          setView((v) => ({ ...v, incoming: null, incomingTag: "" }));
           break;
         case "beam_progress":
           setView((v) => ({
@@ -305,6 +335,9 @@ export function useStation() {
             setView((v) => ({ ...v, ml: !!m.on }));
           } else if (m.type === "beam-started") {
             setView((v) => ({ ...v, beam: { ...v.beam, sending: m.id >= 0, id: m.id >= 0 ? m.id : null, round: 0, bytes: m.bytes ?? 0, startedAt: Date.now(), lastRoundSec: null } }));
+          } else if (m.type === "sent-bytes") {
+            pendingSends.current.get(m.ref)?.(m.id);
+            pendingSends.current.delete(m.ref);
           } else if (m.type === "sent") {
             setView((v) => ({
               ...v,
@@ -410,6 +443,25 @@ export function useStation() {
     wake();
     post({ type: "call" });
   }, [post, wake]);
+  /** Calls with a tag (up to 16 bytes) shown to the answerer. */
+  const callTagged = useCallback(
+    (tag: Uint8Array) => {
+      wake();
+      post({ type: "call", tag });
+    },
+    [post, wake],
+  );
+  /** Sends a binary message over the connected link. Resolves to the link message id, or -1. */
+  const sendBytes = useCallback(
+    (kind: number, bytes: Uint8Array) =>
+      new Promise<number>((resolve) => {
+        if (!workerRef.current) return resolve(-1);
+        const ref = `b-${msgKey.current++}`;
+        pendingSends.current.set(ref, resolve);
+        workerRef.current.postMessage({ type: "send-bytes", kind, bytes, ref });
+      }),
+    [],
+  );
   const accept = useCallback(() => {
     wake();
     setView((v) => ({ ...v, incoming: null }));
@@ -474,5 +526,5 @@ export function useStation() {
     [post],
   );
 
-  return { view, analyser: analyserRef, start, call, accept, decline, hangup, reject, confirm, setAnswer, send, testSpeaker, setBand, setMl, setVolume, beamStart, beamStop };
+  return { view, analyser: analyserRef, start, call, callTagged, accept, decline, hangup, reject, confirm, setAnswer, send, sendBytes, subscribe, testSpeaker, setBand, setMl, setVolume, beamStart, beamStop };
 }

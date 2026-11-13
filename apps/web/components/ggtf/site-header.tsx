@@ -10,7 +10,13 @@ export function SiteHeader() {
           <Ghost className="size-5 text-primary" />
           <span className="font-display text-2xl leading-none text-primary glow">GGTF</span>
         </Link>
-        <nav className="ml-auto flex items-center gap-1">
+        <nav className="ml-auto flex items-center gap-1 overflow-x-auto">
+          <Link href="/seance" className={buttonVariants({ variant: "ghost", size: "sm" })}>
+            Séance OS
+          </Link>
+          <Link href="/studio" className={buttonVariants({ variant: "ghost", size: "sm" })}>
+            Studio
+          </Link>
           <Link href="/link" className={buttonVariants({ variant: "ghost", size: "sm" })}>
             Séance link
           </Link>

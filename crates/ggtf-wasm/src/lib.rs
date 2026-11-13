@@ -2,6 +2,8 @@
 
 use ggtf_core::beam::BeamEvent;
 use ggtf_core::bench;
+use ggtf_core::bundle;
+use ggtf_core::duo::Duo;
 use ggtf_core::link::{LinkEvent, Role};
 use ggtf_core::ml::{self, Decoder};
 use ggtf_core::profile::{Band, ProfileId};
@@ -57,14 +59,27 @@ fn event_json(e: &StationEvent) -> Value {
             LinkEvent::PeerConfirmed => json!({ "type": "peer_confirmed" }),
             LinkEvent::Trained { mask, profile } => json!({ "type": "trained", "mask": mask, "profile": profile.name() }),
             LinkEvent::MsgStatus { id, status } => json!({ "type": "msg_status", "id": id, "status": status.name() }),
-            LinkEvent::MsgReceived { text } => json!({ "type": "msg_rx", "text": String::from_utf8_lossy(text) }),
+            LinkEvent::MsgReceived { kind, data } => json!({
+                "type": "msg_rx", "kind": kind, "bytes": data.len(),
+                "text": if *kind == ggtf_core::link::KIND_TEXT { String::from_utf8_lossy(data).into_owned() } else { String::new() },
+                "b64": base64(data)
+            }),
             LinkEvent::Retry { what, attempt, profile } => json!({ "type": "retry", "what": what, "attempt": attempt, "profile": profile.name() }),
             LinkEvent::Log { text } => json!({ "type": "log", "text": text }),
             LinkEvent::Ended { reason } => json!({ "type": "ended", "reason": reason }),
-            LinkEvent::Incoming { from } => json!({ "type": "incoming", "from": from }),
+            LinkEvent::Incoming { from, tag } => json!({ "type": "incoming", "from": from, "tag": hex(tag) }),
+            LinkEvent::Answering { from, tag } => json!({ "type": "answering", "from": from, "tag": hex(tag) }),
             LinkEvent::IncomingGone => json!({ "type": "incoming_gone" }),
         },
     }
+}
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+fn secret32(b: &[u8]) -> Option<[u8; 32]> {
+    b.try_into().ok()
 }
 
 fn band(v: u8) -> Band {
@@ -117,6 +132,21 @@ impl WasmStation {
 
     pub fn call(&mut self, now: f64) {
         self.inner.call(now);
+    }
+
+    /// Calls with a tag (up to 16 bytes) that the answerer sees with the incoming call.
+    pub fn call_tagged(&mut self, tag: &[u8], now: f64) {
+        self.inner.call_tagged(now, tag);
+    }
+
+    /// Keep-alive interval in ms while connected and idle; 0 turns it off.
+    pub fn set_keepalive(&mut self, ms: f64) {
+        self.inner.link.set_keepalive(ms);
+    }
+
+    /// Sends a binary message (kind 0 text, 1 GGTP). Returns the message id, or -1.
+    pub fn send_bytes(&mut self, kind: u8, data: &[u8], now: f64) -> i32 {
+        self.inner.send_msg(kind, data, now).map(|v| v as i32).unwrap_or(-1)
     }
 
     pub fn set_answer(&mut self, on: bool) {
@@ -189,9 +219,132 @@ impl WasmStation {
             "last_snr": r.last_snr_db, "last_score": r.last_score,
             "tx_frames": s.tx_frames, "rx_frames": s.rx_frames, "own_frames": s.own_frames,
             "busy": self.inner.busy(), "beaming": self.inner.beaming(),
-            "decoder": self.inner.decoder().name(), "band": self.inner.link.band().name()
+            "decoder": self.inner.decoder().name(), "band": self.inner.link.band().name(),
+            "link": link_json(&self.inner.link)
         })
         .to_string()
+    }
+}
+
+fn link_json(l: &ggtf_core::link::Link) -> Value {
+    let s = l.link_stats;
+    json!({
+        "frag": l.frag_size(), "frag_limit": s.frag_limit, "acks": s.acks_sent, "piggybacked": s.acks_piggybacked,
+        "pings": s.pings, "backlog": l.backlog(), "state": l.state().name(), "profile": l.profile().name()
+    })
+}
+
+// ---------- spirit bundles ----------
+
+/// Public key (32 bytes) for a 32-byte author secret. Empty if the secret has the wrong length.
+#[wasm_bindgen]
+pub fn author_public(secret: &[u8]) -> Vec<u8> {
+    secret32(secret).map(|s| bundle::author_public(&s).to_vec()).unwrap_or_default()
+}
+
+/// The 4 author words for a public key, as a JSON array.
+#[wasm_bindgen]
+pub fn author_words(public: &[u8]) -> String {
+    match <[u8; 32]>::try_from(public) {
+        Ok(p) => json!(bundle::author_words(&p)).to_string(),
+        Err(_) => "[]".into(),
+    }
+}
+
+/// Compresses and signs a spirit source. Empty on failure (bad secret, source over 256 KB).
+#[wasm_bindgen]
+pub fn bundle_pack(secret: &[u8], source: &str) -> Vec<u8> {
+    secret32(secret).and_then(|s| bundle::pack(&s, source.as_bytes())).unwrap_or_default()
+}
+
+/// Verifies and unpacks a bundle: `{ok, error?, author, words, hash, source, bytes}`.
+#[wasm_bindgen]
+pub fn bundle_open(data: &[u8]) -> String {
+    match bundle::open(data) {
+        Ok(o) => match String::from_utf8(o.source) {
+            Ok(source) => json!({
+                "ok": true, "author": hex(&o.author), "words": bundle::author_words(&o.author),
+                "hash": hex(&o.hash), "source": source, "bytes": data.len()
+            }),
+            Err(_) => json!({ "ok": false, "error": "the spirit source is not valid text" }),
+        },
+        Err(e) => json!({ "ok": false, "error": e.message() }),
+    }
+    .to_string()
+}
+
+#[wasm_bindgen]
+pub fn is_bundle(data: &[u8]) -> bool {
+    bundle::is_bundle(data)
+}
+
+// ---------- sim air for Spirit Studio ----------
+
+/// Two real stations on simulated air. Events come back tagged with `side` 0 (A) or 1 (B).
+#[wasm_bindgen]
+pub struct WasmDuo {
+    inner: Duo,
+}
+
+#[wasm_bindgen]
+impl WasmDuo {
+    #[wasm_bindgen(constructor)]
+    pub fn new(seed: u32) -> WasmDuo {
+        WasmDuo { inner: Duo::new(seed as u64) }
+    }
+
+    pub fn set_noise(&mut self, sigma: f32) {
+        self.inner.noise = sigma.clamp(0.0, 0.5);
+    }
+
+    pub fn set_loss(&mut self, p: f32) {
+        self.inner.loss = p.clamp(0.0, 0.5);
+    }
+
+    /// Station A calls B; both sides confirm automatically.
+    pub fn connect(&mut self) {
+        self.inner.connect();
+    }
+
+    pub fn hangup(&mut self, side: u8) {
+        let now = self.inner.now;
+        self.inner.st[(side & 1) as usize].hangup(now);
+    }
+
+    /// Advances simulated time by `ms`.
+    pub fn run(&mut self, ms: f64) {
+        self.inner.run_for(ms);
+    }
+
+    pub fn now(&self) -> f64 {
+        self.inner.now
+    }
+
+    pub fn state(&self, side: u8) -> String {
+        self.inner.st[(side & 1) as usize].link.state().name().into()
+    }
+
+    pub fn send(&mut self, side: u8, kind: u8, data: &[u8]) -> i32 {
+        let now = self.inner.now;
+        self.inner.st[(side & 1) as usize].send_msg(kind, data, now).map(|v| v as i32).unwrap_or(-1)
+    }
+
+    pub fn link(&self, side: u8) -> String {
+        link_json(&self.inner.st[(side & 1) as usize].link).to_string()
+    }
+
+    pub fn take_events(&mut self) -> String {
+        let ev: Vec<Value> = self
+            .inner
+            .take_events()
+            .iter()
+            .map(|(s, e)| {
+                let mut v = event_json(e);
+                v["side"] = json!(s);
+                v
+            })
+            .collect();
+        Value::Array(ev).to_string()
     }
 }
 

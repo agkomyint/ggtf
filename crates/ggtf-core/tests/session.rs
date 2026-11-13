@@ -81,7 +81,7 @@ impl Air {
 fn received(ev: &[StationEvent]) -> Vec<String> {
     ev.iter()
         .filter_map(|e| match e {
-            StationEvent::Link(LinkEvent::MsgReceived { text }) => Some(String::from_utf8_lossy(text).into_owned()),
+            StationEvent::Link(LinkEvent::MsgReceived { data, .. }) => Some(String::from_utf8_lossy(data).into_owned()),
             _ => None,
         })
         .collect()
@@ -146,7 +146,7 @@ fn manual_accept_rings_then_connects() {
     air.b.set_answer(false);
     let now = air.now;
     air.a.call(now);
-    let rang = air.run_until(20_000.0, |s| s.ev_b.iter().any(|e| matches!(e, StationEvent::Link(LinkEvent::Incoming { from: 0xA11A }))));
+    let rang = air.run_until(20_000.0, |s| s.ev_b.iter().any(|e| matches!(e, StationEvent::Link(LinkEvent::Incoming { from: 0xA11A, .. }))));
     assert!(rang, "B never saw the incoming call");
     assert_eq!(air.b.link.state(), LinkState::Idle, "B must not answer by itself");
     let now = air.now;

@@ -235,6 +235,10 @@ export function LinkConsole() {
               <Stat label="Decoder" value={view.stats?.decoder ?? (view.ml ? "ml" : "classic")} />
               <Stat label="Signal margin" value={s && s.frames > 0 ? `${s.last_snr.toFixed(1)} dB` : "—"} />
               <Separator className="my-2" />
+              <Stat label="Fragment size" value={s?.link && view.state !== "idle" ? `${s.link.frag} B` : "—"} />
+              <Stat label="ACKs carried on replies" value={s?.link ? `${s.link.piggybacked} of ${s.link.piggybacked + s.link.acks}` : "—"} />
+              <Stat label="Keep-alives" value={s?.link?.pings ?? 0} />
+              <Separator className="my-2" />
               <Stat label="Frames sent" value={s?.tx_frames ?? 0} />
               <Stat label="Frames heard" value={s?.rx_frames ?? 0} />
               <Stat label="Own echoes ignored" value={s?.own_frames ?? 0} />

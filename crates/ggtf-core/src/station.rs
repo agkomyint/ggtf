@@ -149,6 +149,9 @@ impl Station {
     }
 
     pub fn tick(&mut self, now: f64) {
+        if self.busy() {
+            self.link.defer_timers(now);
+        }
         self.link.tick(now);
         self.drain_link();
     }
@@ -236,8 +239,12 @@ impl Station {
     // ---------- link actions ----------
 
     pub fn call(&mut self, now: f64) {
+        self.call_tagged(now, &[]);
+    }
+    /// Calls with a tag the answerer sees (Séance OS sends the spirit's app id).
+    pub fn call_tagged(&mut self, now: f64, tag: &[u8]) {
         self.beam_stop();
-        self.link.call(now);
+        self.link.call_tagged(now, tag);
         self.drain_link();
     }
     pub fn set_answer(&mut self, on: bool) {
@@ -267,6 +274,12 @@ impl Station {
     }
     pub fn send_text(&mut self, text: &[u8], _now: f64) -> Option<u32> {
         let r = self.link.send_text(text);
+        self.drain_link();
+        r
+    }
+    /// Sends a binary message of `kind` over the connected link.
+    pub fn send_msg(&mut self, kind: u8, data: &[u8], _now: f64) -> Option<u32> {
+        let r = self.link.send_msg(kind, data);
         self.drain_link();
         r
     }
