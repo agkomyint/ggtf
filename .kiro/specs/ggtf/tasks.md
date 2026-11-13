@@ -26,7 +26,7 @@ Each phase ends with something that works on its own, so the project is submitta
 - [x] 4. Framing and error correction
   - [x] 4.1 Header encode/parse with CRC-16
   - [x] 4.2 Payload Reed-Solomon and CRC-32, with erasure support *(one codeword per part, so no interleaving)*
-  - [x] 4.3 Fragmentation and reassembly of messages larger than one frame *(in the link layer, 60 bytes per frame)*
+  - [x] 4.3 Fragmentation and reassembly of messages larger than one frame *(in the link layer; originally 60 bytes per frame, now 56–176 bytes by profile and cut when sent, see `.kiro/specs/seance-os/design.md`)*
   - [x] 4.4* Property tests: round trip, no silent corruption (properties 1, 3) *(property 12 covered by the session test, not a property test)*
   - _Requirements: 1.2, 1.3, 1.4, 1.5_
 - [x] 5. Channel simulator

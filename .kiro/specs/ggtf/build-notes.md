@@ -69,3 +69,8 @@ Scope of this build: Phase 0 to Phase 2 plus the simulator lab. ML (Phase 4), Py
   - Turbo with long frames failed over real air (chunks 96 and 196), so the UI marks it experimental and moves images off Turbo.
 - Bench now 252 cells: classic 86.9% / ML 90.0% overall; hard+brutal 79.1% / 84.0%; 0 corrupted frames.
 - Model retrained with poltergeist symbols: val symbol accuracy 87.7% classic → 89.1% ML.
+
+## Round 4: Séance OS (spec in `.kiro/specs/seance-os/`)
+- Link: binary messages up to 12 KB tagged by kind; fragments of 56–176 B cut when sent and shrunk after retries; ACKs ride inside replies (DATA AAD now covers `ack` and `flags`); timers wait while a frame is arriving; growing random backoff; 45 s keep-alive; CALL tags; progress events.
+- The line test no longer picks Turbo unless `set_turbo(true)`: over real air a 1 KB message took 51.7 s on Turbo and 37.5 s on Banshee.
+- Measured over real air: app share (1,214 B) 28 s; Play together to playing about 30 s; game move 1.2–2.8 s; 1 KB letter 37.5 s.
