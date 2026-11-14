@@ -46,7 +46,9 @@ export interface StationView {
   mlAvailable: boolean;
   volume: number;
   bands: BandInfo[];
-  beam: { sending: boolean; id: number | null; round: number; chunks: number; text: string | null; bytes: number; startedAt: number; lastRoundSec: number | null };
+  beam: { sending: boolean; id: number | null; round: number; chunks: number; text: string | null; bytes: number; startedAt: number; lastRoundSec: number | null; caught: number[] };
+  /** Reply "caught it" to beams we receive. */
+  beamReply: boolean;
   beamProgress: { id: number; from: number; have: number; count: number; got: string; firstAt: number } | null;
   beamInbox: { key: string; id: number; from: number; text: string; b64: string; bytes: number; at: number; seconds: number | null }[];
 }
@@ -91,7 +93,8 @@ export function useStation() {
     mlAvailable: false,
     volume: 1,
     bands: [],
-    beam: { sending: false, id: null, round: 0, chunks: 0, text: null, bytes: 0, startedAt: 0, lastRoundSec: null },
+    beam: { sending: false, id: null, round: 0, chunks: 0, text: null, bytes: 0, startedAt: 0, lastRoundSec: null, caught: [] },
+    beamReply: true,
     beamProgress: null,
     beamInbox: [],
   }));
@@ -249,6 +252,11 @@ export function useStation() {
           setView((v) => ({ ...v, beam: { ...v.beam, sending: false } }));
           addLog(`beam stopped after ${e.rounds} round${e.rounds === 1 ? "" : "s"}`);
           break;
+        case "beam_caught":
+          setView((v) => (v.beam.id !== e.id || v.beam.caught.includes(e.by) ? v : { ...v, beam: { ...v.beam, caught: [...v.beam.caught, e.by] } }));
+          addLog(`station ${stationLabel(e.by)} caught the beam`, "good");
+          toast.success("Your beam was caught", { description: `by station ${stationLabel(e.by)}` });
+          break;
         case "detect":
           break;
         case "rx_failed":
@@ -334,7 +342,7 @@ export function useStation() {
           } else if (m.type === "ml") {
             setView((v) => ({ ...v, ml: !!m.on }));
           } else if (m.type === "beam-started") {
-            setView((v) => ({ ...v, beam: { ...v.beam, sending: m.id >= 0, id: m.id >= 0 ? m.id : null, round: 0, bytes: m.bytes ?? 0, startedAt: Date.now(), lastRoundSec: null } }));
+            setView((v) => ({ ...v, beam: { ...v.beam, sending: m.id >= 0, id: m.id >= 0 ? m.id : null, round: 0, bytes: m.bytes ?? 0, startedAt: Date.now(), lastRoundSec: null, caught: [] } }));
           } else if (m.type === "sent-bytes") {
             pendingSends.current.get(m.ref)?.(m.id);
             pendingSends.current.delete(m.ref);
@@ -353,7 +361,7 @@ export function useStation() {
         };
         worker.onerror = (err) => reject(new Error(err.message || "worker failed to load"));
         worker.postMessage(
-          { type: "init-station", id: view.id, seed: view.id * 7919 + Date.now() % 100000, answer: view.answer, band: view.band, ml: view.ml, port: channel.port2 },
+          { type: "init-station", id: view.id, seed: view.id * 7919 + Date.now() % 100000, answer: view.answer, band: view.band, ml: view.ml, beamReply: view.beamReply, port: channel.port2 },
           [channel.port2],
         );
       });
@@ -373,7 +381,7 @@ export function useStation() {
       diag("start_failed", { message: msg, name: err instanceof Error ? err.name : typeof err });
       setView((v) => ({ ...v, starting: false, error: msg }));
     }
-  }, [view.starting, view.id, view.answer, view.band, view.ml, view.volume, handleEvent, addLog]);
+  }, [view.starting, view.id, view.answer, view.band, view.ml, view.beamReply, view.volume, handleEvent, addLog]);
 
   const post = useCallback((m: Record<string, unknown>) => {
     diag("action", { action: m.type, hasWorker: !!workerRef.current, audio: ctxRef.current?.state ?? null });
@@ -502,18 +510,25 @@ export function useStation() {
     setView((v) => ({ ...v, volume: value }));
     nodeRef.current?.port.postMessage({ type: "volume", value });
   }, []);
-  /** Starts a beam of text or raw bytes (images). `chunk` = bytes per frame. */
+  /** Starts a beam of text or raw bytes (images). `chunk` = bytes per frame. `stopOnCatch` ends it on the first reply. */
   const beamStart = useCallback(
-    (content: string | Uint8Array, profile: number, rounds = 0, chunk = 48) => {
+    (content: string | Uint8Array, profile: number, rounds = 0, chunk = 48, stopOnCatch = false) => {
       wake();
       const text = typeof content === "string" ? content : null;
-      setView((v) => ({ ...v, beam: { sending: true, id: null, round: 0, chunks: 0, text, bytes: 0, startedAt: Date.now(), lastRoundSec: null } }));
-      if (typeof content === "string") post({ type: "beam-start", text: content, profile, band: viewRef.current.band, rounds, chunk });
-      else post({ type: "beam-start", bytes: content, profile, band: viewRef.current.band, rounds, chunk });
+      setView((v) => ({ ...v, beam: { sending: true, id: null, round: 0, chunks: 0, text, bytes: 0, startedAt: Date.now(), lastRoundSec: null, caught: [] } }));
+      if (typeof content === "string") post({ type: "beam-start", text: content, profile, band: viewRef.current.band, rounds, chunk, stopOnCatch });
+      else post({ type: "beam-start", bytes: content, profile, band: viewRef.current.band, rounds, chunk, stopOnCatch });
     },
     [post, wake],
   );
   const beamStop = useCallback(() => post({ type: "beam-stop" }), [post]);
+  const setBeamReply = useCallback(
+    (on: boolean) => {
+      setView((v) => ({ ...v, beamReply: on }));
+      post({ type: "beam-reply", on });
+    },
+    [post],
+  );
   const send = useCallback(
     (text: string) => {
       const ref = `out-${msgKey.current++}`;
@@ -526,5 +541,5 @@ export function useStation() {
     [post],
   );
 
-  return { view, analyser: analyserRef, start, call, callTagged, accept, decline, hangup, reject, confirm, setAnswer, send, sendBytes, subscribe, testSpeaker, setBand, setMl, setVolume, beamStart, beamStop };
+  return { view, analyser: analyserRef, start, call, callTagged, accept, decline, hangup, reject, confirm, setAnswer, send, sendBytes, subscribe, testSpeaker, setBand, setMl, setVolume, beamStart, beamStop, setBeamReply };
 }

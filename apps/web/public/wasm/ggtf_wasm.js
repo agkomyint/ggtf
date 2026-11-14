@@ -311,6 +311,20 @@ export class WasmStation {
         wasm.wasmstation_set_band(this.__wbg_ptr, b);
     }
     /**
+     * Reply "caught it" to beams this station receives (on by default).
+     * @param {boolean} on
+     */
+    set_beam_reply(on) {
+        wasm.wasmstation_set_beam_reply(this.__wbg_ptr, on);
+    }
+    /**
+     * Stop our beam when the first receiver replies.
+     * @param {boolean} on
+     */
+    set_beam_stop_on_catch(on) {
+        wasm.wasmstation_set_beam_stop_on_catch(this.__wbg_ptr, on);
+    }
+    /**
      * Keep-alive interval in ms while connected and idle; 0 turns it off.
      * @param {number} ms
      */

@@ -73,6 +73,14 @@ export class WasmStation {
      */
     set_band(b: number): void;
     /**
+     * Reply "caught it" to beams this station receives (on by default).
+     */
+    set_beam_reply(on: boolean): void;
+    /**
+     * Stop our beam when the first receiver replies.
+     */
+    set_beam_stop_on_catch(on: boolean): void;
+    /**
      * Keep-alive interval in ms while connected and idle; 0 turns it off.
      */
     set_keepalive(ms: number): void;
@@ -180,6 +188,8 @@ export interface InitOutput {
     readonly wasmstation_send_text: (a: number, b: number, c: number, d: number) => number;
     readonly wasmstation_set_answer: (a: number, b: number) => void;
     readonly wasmstation_set_band: (a: number, b: number) => void;
+    readonly wasmstation_set_beam_reply: (a: number, b: number) => void;
+    readonly wasmstation_set_beam_stop_on_catch: (a: number, b: number) => void;
     readonly wasmstation_set_keepalive: (a: number, b: number) => void;
     readonly wasmstation_set_ml: (a: number, b: number) => number;
     readonly wasmstation_set_turbo: (a: number, b: number) => void;

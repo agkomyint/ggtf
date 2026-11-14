@@ -17,6 +17,33 @@ pub const MAX_CHUNK: usize = crate::frame::MAX_PAYLOAD - 4;
 pub const MAX_MESSAGE: usize = 16 * 1024;
 /// Forget partial messages not heard for this long.
 pub const STALE_MS: f64 = 120_000.0;
+/// Quiet time the sender leaves after each round so receivers can reply.
+pub const REPLY_WINDOW_MS: f64 = 1200.0;
+/// A receiver waits a random 0..this before replying, so several receivers spread out.
+pub const REPLY_JITTER_MS: f64 = 400.0;
+/// Most replies one receiver sends for one beam.
+pub const MAX_REPLIES: u8 = 3;
+
+/// The "I caught it" frame: header only, beam id in seq (high byte) and ack (low byte).
+pub fn reply_frame(from: u16, to: u16, beam_id: u16) -> Frame {
+    let mut f = Frame::new(FrameType::BeamReply, from, to, Vec::new());
+    f.seq = (beam_id >> 8) as u8;
+    f.ack = beam_id as u8;
+    f
+}
+
+/// Beam id carried by a reply frame.
+pub fn reply_beam_id(f: &Frame) -> u16 {
+    u16::from_be_bytes([f.seq, f.ack])
+}
+
+/// (beam id, chunk index, chunk count) of a BEAM frame.
+pub fn chunk_info(f: &Frame) -> Option<(u16, u8, u8)> {
+    if f.ftype != FrameType::Beam || f.payload.len() < 5 {
+        return None;
+    }
+    Some((u16::from_be_bytes([f.payload[0], f.payload[1]]), f.payload[2], f.payload[3]))
+}
 
 pub fn chunk_frames(src: u16, beam_id: u16, msg: &[u8], chunk: usize) -> Vec<Frame> {
     let chunk = chunk.clamp(16, MAX_CHUNK);
@@ -55,6 +82,11 @@ pub struct BeamReceiver {
 }
 
 impl BeamReceiver {
+    /// True once the beam `id` from `from` has been fully received.
+    pub fn is_done(&self, from: u16, id: u16) -> bool {
+        self.parts.get(&(from, id)).is_some_and(|a| a.done)
+    }
+
     pub fn on_frame(&mut self, f: &Frame, now: f64) -> Option<BeamEvent> {
         if f.ftype != FrameType::Beam || f.payload.len() < 5 {
             return None;

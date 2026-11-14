@@ -123,6 +123,12 @@ try {
   await evaluate(`B.worker.postMessage({ type: 'ml', on: true }); A.worker.postMessage({ type: 'beam-start', text: 'https://github.com/agkomyint/ggtf', profile: 1, band: 2, rounds: 3 })`);
   step("beam on high band reaches B (ML on, no pairing)", await waitFor(`B.events.some(e => e.type === 'beam_rx' && e.text === 'https://github.com/agkomyint/ggtf')`, 60000));
   step("B stayed idle during the beam", (await evaluate<string>(lastState("B"))) === "idle");
+  step("A hears B's catch reply", await waitFor(`A.events.some(e => e.type === 'beam_caught')`, 30000));
+  const stops = await evaluate<number>(`A.events.filter(e => e.type === 'beam_stopped').length`);
+  await evaluate(`window.__stopT0 = performance.now(); A.worker.postMessage({ type: 'beam-start', text: 'stop when caught', profile: 2, band: 1, rounds: 0, stopOnCatch: true })`);
+  const stopped = await waitFor(`A.events.filter(e => e.type === 'beam_stopped').length > ${stops}`, 30000);
+  step("stop-on-catch ends an endless beam by itself", stopped);
+  if (stopped) console.log("      stopped after", await evaluate<string>(`((performance.now() - window.__stopT0) / 1000).toFixed(1) + ' s'`));
   const img = await evaluate<string>(`(async () => {
     const c = new OffscreenCanvas(72, 72); const g = c.getContext('2d');
     const grad = g.createLinearGradient(0, 0, 72, 72); grad.addColorStop(0, '#6dff9c'); grad.addColorStop(1, '#5b2a86');

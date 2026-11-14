@@ -32,6 +32,9 @@ pub enum FrameType {
     Bye = 8,
     /// Connectionless broadcast chunk ("haunted QR").
     Beam = 9,
+    /// A receiver telling a beam's sender it caught the whole message. Header only:
+    /// seq/ack carry the beam id.
+    BeamReply = 10,
 }
 
 impl FrameType {
@@ -46,6 +49,7 @@ impl FrameType {
             7 => Self::Ack,
             8 => Self::Bye,
             9 => Self::Beam,
+            10 => Self::BeamReply,
             _ => return None,
         })
     }
@@ -61,6 +65,7 @@ impl FrameType {
             Self::Ack => "ACK",
             Self::Bye => "BYE",
             Self::Beam => "BEAM",
+            Self::BeamReply => "BEAM_REPLY",
         }
     }
 }

@@ -28,6 +28,7 @@ export type StationEvent =
   | { type: "beam_rx"; id: number; from: number; text: string; b64: string; bytes: number }
   | { type: "beam_round"; id: number; round: number; chunks: number }
   | { type: "beam_stopped"; id: number; rounds: number }
+  | { type: "beam_caught"; id: number; by: number }
   | { type: "detect"; score: number }
   | { type: "rx_failed"; stage: string }
   | { type: "rx_frame"; kind: string; profile: ProfileName; band: string; snr: number; from: number; own: boolean }

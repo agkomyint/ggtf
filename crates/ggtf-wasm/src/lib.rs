@@ -51,6 +51,7 @@ fn event_json(e: &StationEvent) -> Value {
         }),
         StationEvent::BeamRound { id, round, chunks } => json!({ "type": "beam_round", "id": id, "round": round, "chunks": chunks }),
         StationEvent::BeamStopped { id, rounds } => json!({ "type": "beam_stopped", "id": id, "rounds": rounds }),
+        StationEvent::BeamCaught { id, by } => json!({ "type": "beam_caught", "id": id, "by": by }),
         StationEvent::Link(l) => match l {
             LinkEvent::State { state, role, peer, profile } => json!({
                 "type": "state", "state": state.name(), "role": role_name(*role), "peer": peer, "profile": profile.name()
@@ -210,6 +211,16 @@ impl WasmStation {
 
     pub fn beam_stop(&mut self) {
         self.inner.beam_stop();
+    }
+
+    /// Reply "caught it" to beams this station receives (on by default).
+    pub fn set_beam_reply(&mut self, on: bool) {
+        self.inner.set_beam_reply(on);
+    }
+
+    /// Stop our beam when the first receiver replies.
+    pub fn set_beam_stop_on_catch(&mut self, on: bool) {
+        self.inner.set_beam_stop_on_catch(on);
     }
 
     pub fn take_events(&mut self) -> String {

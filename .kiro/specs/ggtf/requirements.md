@@ -152,3 +152,16 @@ Out of scope for this spec: running actions on the host computer (no local helpe
 2. THE repository SHALL provide Bun scripts to build the WebAssembly package, run the web app, run all tests (TypeScript, Rust and Python) and run the benchmark.
 3. THE README SHALL list required tools and versions and the exact setup steps.
 4. THE repository SHALL include the trained model file, or a script that downloads it, so the web app works without retraining.
+
+### Requirement 12: Know when a Haunted QR beam was caught
+
+**User story:** As someone beaming a link or Wi-Fi login, I want to see which devices caught it and optionally stop beaming on the first catch, so that I don't keep beaming after the other person already has it.
+
+#### Acceptance criteria
+
+1. WHEN a receiver has the whole beam and hears the last chunk of a round, THE receiver SHALL send a short `BEAM_REPLY` frame addressed to the sender, carrying the beam id, after a random delay of up to 400 ms.
+2. AFTER each round except the last, THE sender SHALL stay quiet for a reply window (1.2 s) so that replies don't collide with the next chunk. WHEN it hears a reply, THE sender SHALL extend the window so other receivers can reply too.
+3. WHEN the sender hears a reply for its current or most recent beam, THE sender SHALL report the replying station once per station.
+4. WHERE "stop when caught" is on, THE sender SHALL stop the beam after the first reply.
+5. THE receiver SHALL reply at most 3 times per beam, and the user SHALL be able to turn replies off. With replies off, the receiver SHALL stay silent.
+6. A reply SHALL hold no message content, only the beam id and the two station ids.

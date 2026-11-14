@@ -112,6 +112,20 @@ function Received({ text, b64 }: { text: string; b64: string }) {
   );
 }
 
+/** Stations that replied "caught it" to our beam. */
+function CatcherList({ caught }: { caught: number[] }) {
+  return (
+    <p className="flex flex-wrap items-center gap-2 text-sm">
+      <Check className="size-4 text-primary" /> Caught by
+      {caught.map((id) => (
+        <Badge key={id} variant="secondary" className="font-mono">
+          {stationLabel(id)}
+        </Badge>
+      ))}
+    </p>
+  );
+}
+
 /** One square per chunk: lit once that chunk has been heard. */
 export function ChunkMap({ got }: { got: string }) {
   return (
@@ -124,7 +138,7 @@ export function ChunkMap({ got }: { got: string }) {
 }
 
 export function BeamConsole() {
-  const { view, analyser, start, testSpeaker, setBand, setMl, setVolume, beamStart, beamStop } = useStation();
+  const { view, analyser, start, testSpeaker, setBand, setMl, setVolume, beamStart, beamStop, setBeamReply } = useStation();
   const [mode, setMode] = useState("text");
   const [text, setText] = useState("https://github.com/agkomyint/ggtf");
   const [ssid, setSsid] = useState("");
@@ -133,6 +147,7 @@ export function BeamConsole() {
   const [profile, setProfile] = useState(1);
   const [bigChunks, setBigChunks] = useState(false);
   const [forever, setForever] = useState(true);
+  const [stopOnCatch, setStopOnCatch] = useState(true);
   const [file, setFile] = useState<File | null>(null);
   const [preset, setPreset] = useState("small");
   const [gray, setGray] = useState(false);
@@ -170,10 +185,11 @@ export function BeamConsole() {
   const sending = view.beam.sending;
   const busyLink = view.state !== "idle";
   const prog = view.beamProgress;
+  const caught = view.beam.caught;
 
   const go = () => {
-    if (isImage && image) beamStart(image.bytes, profile, forever ? 0 : 3, chunk);
-    else beamStart(textPayload, profile, forever ? 0 : 3, chunk);
+    if (isImage && image) beamStart(image.bytes, profile, forever ? 0 : 3, chunk, stopOnCatch);
+    else beamStart(textPayload, profile, forever ? 0 : 3, chunk, stopOnCatch);
   };
 
   return (
@@ -326,6 +342,14 @@ export function BeamConsole() {
               <Switch id="forever" checked={forever} onCheckedChange={(v) => setForever(Boolean(v))} disabled={sending} />
             </div>
 
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="stop-on-catch" className="flex flex-col items-start gap-0.5">
+                <span>Stop when someone catches it</span>
+                <span className="text-xs font-normal text-muted-foreground">Receivers send a short reply once they have the whole message. Turn off to beam to a whole room and count who caught it.</span>
+              </Label>
+              <Switch id="stop-on-catch" checked={stopOnCatch} onCheckedChange={(v) => setStopOnCatch(Boolean(v))} disabled={sending} />
+            </div>
+
             <div className="grid grid-cols-3 gap-2 rounded-lg border border-border bg-background/40 p-3 text-center">
               <div>
                 <p className="font-mono text-lg">{bytes.toLocaleString()}</p>
@@ -354,12 +378,22 @@ export function BeamConsole() {
                     <span className="text-foreground">{(view.beam.bytes / view.beam.lastRoundSec).toFixed(1)} B/s</span>
                   </p>
                 )}
+                {caught.length > 0 ? (
+                  <CatcherList caught={caught} />
+                ) : (
+                  <p className="text-xs text-muted-foreground">No one has replied yet.</p>
+                )}
                 <Button variant="destructive" onClick={beamStop}>
                   <Square /> Stop beaming
                 </Button>
               </div>
             ) : (
               <div className="flex flex-wrap gap-2">
+                {view.beam.id !== null && caught.length > 0 && (
+                  <div className="w-full rounded-lg border border-primary/40 bg-primary/10 p-3">
+                    <CatcherList caught={caught} />
+                  </div>
+                )}
                 <Button size="lg" disabled={!view.started || !ready || tooLong || busyLink} onClick={go}>
                   <RadioTower /> Start beaming
                 </Button>
@@ -380,6 +414,13 @@ export function BeamConsole() {
             <CardDescription>Always listening once the séance is open. Chunks heard in any order, across rounds, are stitched together and checked with a CRC.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="beam-reply" className="flex flex-col items-start gap-0.5">
+                <span>Tell the sender I caught it</span>
+                <span className="text-xs font-normal text-muted-foreground">Sends a short reply with this station&apos;s id, so the sender can stop. Turn off to listen silently.</span>
+              </Label>
+              <Switch id="beam-reply" checked={view.beamReply} onCheckedChange={(v) => setBeamReply(Boolean(v))} />
+            </div>
             {prog ? (
               <div className="space-y-2">
                 <p className="text-sm">

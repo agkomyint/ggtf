@@ -70,6 +70,7 @@ To check everything in Chrome, run `bun scripts/seance-check.ts http://localhost
 - The message and a CRC-32 are cut into 48-byte chunks and repeated in a carousel. A receiver can start listening at any time and fills gaps on the next round, in any order.
 - Wi-Fi logins use the same `WIFI:T:WPA;S:…;P:…;;` text a Wi-Fi QR code holds. Receivers show the network and a **Copy password** button. Links get an **Open link** button, which only works for `http(s)`.
 - Like a printed QR code, it's readable by anyone in earshot, so don't beam secrets.
+- **Caught replies:** once a receiver has the whole message, it sends a short reply to the sender, and the sender shows "Caught by" with the station ids. With **Stop when someone catches it** on (the default), the first reply ends the beam. Turn it off to beam to a room and see everyone who caught it. The sender leaves a 1.2 s gap after each round so replies don't collide with the next chunk. On the receiving side, **Tell the sender I caught it** can be turned off to listen silently.
 - **Images:** the sender shrinks a picture to 48–128 px and compresses it to WebP (JPEG fallback), usually 0.5–3 KB. The receiver shows a live chunk map and then the image.
 - **Speed options:** four speeds (Sturdy, Balanced, Fast, Turbo β) and big chunks (196 bytes per frame instead of 48). The page shows the bytes, the chunk count and the estimated time, then the measured B/s while sending and receiving.
 

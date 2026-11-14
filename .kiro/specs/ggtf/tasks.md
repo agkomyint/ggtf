@@ -116,6 +116,8 @@ Each phase ends with something that works on its own, so the project is submitta
 - [x] B3. Beam mode (`/beam`, "Haunted QR"): chunked carousel broadcast, message CRC, Wi-Fi and link helpers
 - [x] B4. Glare: both sides pressing Call resolves by station id
 - [x] B5. Harder benchmark rooms (21 rooms in 3 tiers, speaker roll-off) and classic-vs-ML tables per profile and band
+- [x] B6. Beam catch replies: `BEAM_REPLY` frame, reply window after each round, catcher list, "stop when caught" on the sender, "tell the sender" switch on the receiver
+  - _Requirements: 12.1-12.6_
 
 ## Phase 5: Full-duplex (stretch)
 

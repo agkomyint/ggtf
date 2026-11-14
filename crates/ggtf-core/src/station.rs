@@ -10,6 +10,8 @@ use crate::ml::Decoder;
 use crate::modem;
 use crate::profile::{Band, ProfileId};
 use crate::receiver::{Receiver, RxEvent, RxStats};
+use crate::rng::Rng;
+use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
 pub enum StationEvent {
@@ -21,6 +23,8 @@ pub enum StationEvent {
     Beam(BeamEvent),
     BeamRound { id: u16, round: u32, chunks: u8 },
     BeamStopped { id: u16, rounds: u32 },
+    /// A receiver replied that it caught our beam. Reported once per station.
+    BeamCaught { id: u16, by: u16 },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -38,6 +42,17 @@ struct BeamTx {
     next: usize,
     round: u32,
     max_rounds: u32,
+    /// End of the reply window after a round, while one is open.
+    hold_until: Option<f64>,
+}
+
+/// A reply waiting for its random delay.
+struct PendingReply {
+    to: u16,
+    id: u16,
+    at: f64,
+    profile: ProfileId,
+    band: Band,
 }
 
 pub struct Station {
@@ -47,6 +62,15 @@ pub struct Station {
     beam_rx: BeamReceiver,
     beam_tx: Option<BeamTx>,
     beam_counter: u16,
+    /// Reply when we catch a beam.
+    beam_reply: bool,
+    /// Stop our own beam on the first reply.
+    beam_stop_on_catch: bool,
+    replies_due: Vec<PendingReply>,
+    replies_sent: HashMap<(u16, u16), u8>,
+    /// Stations that caught our most recent beam (kept after it stops).
+    catchers: Option<(u16, Vec<u16>)>,
+    rng: Rng,
     events: Vec<StationEvent>,
 }
 
@@ -59,6 +83,12 @@ impl Station {
             beam_rx: BeamReceiver::default(),
             beam_tx: None,
             beam_counter: (seed as u16) ^ id,
+            beam_reply: true,
+            beam_stop_on_catch: false,
+            replies_due: Vec::new(),
+            replies_sent: HashMap::new(),
+            catchers: None,
+            rng: Rng::new(seed ^ 0xBEA7_5EED),
             events: Vec::new(),
         }
     }
@@ -140,6 +170,9 @@ impl Station {
                     if let Some(e) = self.beam_rx.on_frame(&frame, now) {
                         self.events.push(StationEvent::Beam(e));
                     }
+                    self.queue_reply(&frame, profile, band, now);
+                } else if frame.ftype == FrameType::BeamReply {
+                    self.on_reply(&frame, now);
                 } else {
                     self.link.on_frame(&frame, profile, band, now);
                     self.drain_link();
@@ -158,14 +191,16 @@ impl Station {
 
     /// Next audio to play, if any. Holds back while any receiver is mid-frame (carrier sense).
     /// Link frames go first; beam chunks fill the gaps.
-    pub fn poll_tx(&mut self, _now: f64) -> Option<Vec<f32>> {
+    pub fn poll_tx(&mut self, now: f64) -> Option<Vec<f32>> {
         if self.busy() {
             return None;
         }
         let (frame, profile, band) = if let Some(req) = self.link.next_tx() {
             (req.frame, req.profile, req.band)
+        } else if let Some(r) = self.next_reply(now) {
+            r
         } else {
-            self.next_beam_frame()?
+            self.next_beam_frame(now)?
         };
         let samples = modem::encode_frame(&frame, profile, band);
         self.stats.tx_frames += 1;
@@ -174,17 +209,29 @@ impl Station {
         Some(samples)
     }
 
-    fn next_beam_frame(&mut self) -> Option<(Frame, ProfileId, Band)> {
+    fn next_beam_frame(&mut self, now: f64) -> Option<(Frame, ProfileId, Band)> {
         let b = self.beam_tx.as_mut()?;
         if b.next >= b.frames.len() {
-            b.next = 0;
-            b.round += 1;
-            self.events.push(StationEvent::BeamRound { id: b.id, round: b.round, chunks: b.frames.len() as u8 });
-            if b.max_rounds > 0 && b.round >= b.max_rounds {
-                let (id, rounds) = (b.id, b.round);
-                self.beam_tx = None;
-                self.events.push(StationEvent::BeamStopped { id, rounds });
-                return None;
+            match b.hold_until {
+                None => {
+                    // A round just ended.
+                    b.round += 1;
+                    self.events.push(StationEvent::BeamRound { id: b.id, round: b.round, chunks: b.frames.len() as u8 });
+                    if b.max_rounds > 0 && b.round >= b.max_rounds {
+                        let (id, rounds) = (b.id, b.round);
+                        self.beam_tx = None;
+                        self.events.push(StationEvent::BeamStopped { id, rounds });
+                        return None;
+                    }
+                    // Stay quiet so receivers that have the whole message can say so.
+                    b.hold_until = Some(now + beam::REPLY_WINDOW_MS);
+                    return None;
+                }
+                Some(t) if now < t => return None,
+                Some(_) => {
+                    b.hold_until = None;
+                    b.next = 0;
+                }
             }
         }
         let b = self.beam_tx.as_mut()?;
@@ -222,8 +269,83 @@ impl Station {
         if frames.len() > 255 {
             return None;
         }
-        self.beam_tx = Some(BeamTx { id, frames, profile, band, next: 0, round: 0, max_rounds: rounds });
+        self.beam_tx = Some(BeamTx { id, frames, profile, band, next: 0, round: 0, max_rounds: rounds, hold_until: None });
+        self.catchers = Some((id, Vec::new()));
         Some(id)
+    }
+
+    /// Whether this station replies when it catches a beam (on by default).
+    pub fn set_beam_reply(&mut self, on: bool) {
+        self.beam_reply = on;
+        if !on {
+            self.replies_due.clear();
+        }
+    }
+
+    pub fn beam_reply(&self) -> bool {
+        self.beam_reply
+    }
+
+    /// Whether our beam stops on the first reply (off by default). Applies to a running beam too.
+    pub fn set_beam_stop_on_catch(&mut self, on: bool) {
+        self.beam_stop_on_catch = on;
+    }
+
+    /// Stations that caught our most recent beam.
+    pub fn beam_catchers(&self) -> &[u16] {
+        self.catchers.as_ref().map(|(_, c)| c.as_slice()).unwrap_or(&[])
+    }
+
+    /// Queues a reply when we have the whole beam and just heard the last chunk of a round,
+    /// which is when the sender opens its reply window.
+    fn queue_reply(&mut self, f: &Frame, profile: ProfileId, band: Band, now: f64) {
+        let Some((id, idx, count)) = beam::chunk_info(f) else { return };
+        // Any chunk of this beam means the previous window has closed.
+        self.replies_due.retain(|r| !(r.to == f.src && r.id == id));
+        if !self.beam_reply || idx as usize + 1 != count as usize || !self.beam_rx.is_done(f.src, id) {
+            return;
+        }
+        if self.replies_sent.get(&(f.src, id)).copied().unwrap_or(0) >= beam::MAX_REPLIES {
+            return;
+        }
+        let at = now + self.rng.range(0.0, beam::REPLY_JITTER_MS);
+        self.replies_due.push(PendingReply { to: f.src, id, at, profile, band });
+    }
+
+    fn next_reply(&mut self, now: f64) -> Option<(Frame, ProfileId, Band)> {
+        // Too late once the sender's window has passed; the next round gives another chance.
+        self.replies_due.retain(|r| now < r.at + beam::REPLY_WINDOW_MS);
+        let i = self.replies_due.iter().position(|r| now >= r.at)?;
+        let r = self.replies_due.remove(i);
+        if self.replies_sent.len() > 256 {
+            self.replies_sent.clear();
+        }
+        *self.replies_sent.entry((r.to, r.id)).or_insert(0) += 1;
+        Some((beam::reply_frame(self.link.id, r.to, r.id), r.profile, r.band))
+    }
+
+    fn on_reply(&mut self, f: &Frame, now: f64) {
+        if f.dst != self.link.id {
+            return;
+        }
+        let id = beam::reply_beam_id(f);
+        let Some((cid, list)) = self.catchers.as_mut() else { return };
+        if *cid != id {
+            return;
+        }
+        if !list.contains(&f.src) {
+            list.push(f.src);
+            self.events.push(StationEvent::BeamCaught { id, by: f.src });
+        }
+        if !self.beam_tx.as_ref().is_some_and(|b| b.id == id) {
+            return;
+        }
+        if self.beam_stop_on_catch {
+            self.beam_stop();
+        } else if let Some(t) = self.beam_tx.as_mut().and_then(|b| b.hold_until.as_mut()) {
+            // Others may still be waiting to reply.
+            *t = t.max(now + beam::REPLY_WINDOW_MS);
+        }
     }
 
     pub fn beam_stop(&mut self) {

@@ -129,6 +129,23 @@ States: `Idle → Calling / Ringing → Training → KeyExchange → AwaitingCon
 - **Duplicate and replay protection:** a per-session sequence window. Frames with a sequence number already accepted are ACKed again but not delivered.
 - **Self-filter:** frames whose `station_id` matches the local station are dropped before any processing.
 
+### 3b. Beam mode and catch replies, in `ggtf-core::beam` and `ggtf-core::station`
+
+Beams (Haunted QR) are connectionless: `BEAM` frames go to the broadcast address in a carousel of rounds.
+Catch replies (Requirement 12) add a one-frame answer without making the beam a session:
+
+- `BEAM_REPLY` (frame type 10) is header-only: `src` = receiver, `dst` = sender, `seq`/`ack` = beam id high/low byte.
+  It uses the profile and band of the chunk it answers.
+- **Sender:** after each round except the last, it leaves a 1.2 s reply window (`REPLY_WINDOW_MS`) before the next round.
+  Carrier sense already holds transmission while any frame is arriving. Each reply heard pushes the window end to
+  now + 1.2 s. Catchers are tracked per beam id and kept after the beam stops, so a reply to the final round still counts.
+  With `stop_on_catch`, the first reply stops the beam.
+- **Receiver:** a reply is queued only when the beam is complete *and* the chunk just heard is the last of its round,
+  so it lands in the sender's window. Random delay 0-400 ms (`REPLY_JITTER_MS`) spreads several receivers apart.
+  Any later chunk of that beam cancels a queued reply (the window has closed) and the next round's last chunk queues it
+  again. At most 3 replies per beam (`MAX_REPLIES`). Replies can be switched off per station.
+- Events: `BeamCaught { id, by }` on the sender, once per catching station.
+
 ### 4. Session security, in `ggtf-core::crypto`
 
 1. Each station creates an ephemeral X25519 key pair per session.

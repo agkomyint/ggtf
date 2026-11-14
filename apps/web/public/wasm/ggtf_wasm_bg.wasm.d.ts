@@ -45,6 +45,8 @@ export const wasmstation_send_bytes: (a: number, b: number, c: number, d: number
 export const wasmstation_send_text: (a: number, b: number, c: number, d: number) => number;
 export const wasmstation_set_answer: (a: number, b: number) => void;
 export const wasmstation_set_band: (a: number, b: number) => void;
+export const wasmstation_set_beam_reply: (a: number, b: number) => void;
+export const wasmstation_set_beam_stop_on_catch: (a: number, b: number) => void;
 export const wasmstation_set_keepalive: (a: number, b: number) => void;
 export const wasmstation_set_ml: (a: number, b: number) => number;
 export const wasmstation_set_turbo: (a: number, b: number) => void;

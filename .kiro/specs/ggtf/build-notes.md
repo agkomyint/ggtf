@@ -74,3 +74,9 @@ Scope of this build: Phase 0 to Phase 2 plus the simulator lab. ML (Phase 4), Py
 - Link: binary messages up to 12 KB tagged by kind; fragments of 56–176 B cut when sent and shrunk after retries; ACKs ride inside replies (DATA AAD now covers `ack` and `flags`); timers wait while a frame is arriving; growing random backoff; 45 s keep-alive; CALL tags; progress events.
 - The line test no longer picks Turbo unless `set_turbo(true)`: over real air a 1 KB message took 51.7 s on Turbo and 37.5 s on Banshee.
 - Measured over real air: app share (1,214 B) 28 s; Play together to playing about 30 s; game move 1.2–2.8 s; 1 KB letter 37.5 s.
+
+## Round 5: beam catch replies (Requirement 12)
+- Receivers send a header-only `BEAM_REPLY` (type 10) after the last chunk of a round once they have the whole beam; random 0-400 ms delay, at most 3 per beam, switchable off.
+- The sender leaves a 1.2 s reply window after each round (extended by each reply heard), lists catchers once each, and with stop-on-catch ends the beam on the first reply.
+- Verified: 4 Rust tests on shared sim air (1 and 2 receivers, replies off, reply to the final round); Chrome loopback: a never-ending beam with stop-on-catch stopped by itself after 3.0 s.
+- Measured B/s per round now includes the 1.2 s window, so short beams read lower than before.

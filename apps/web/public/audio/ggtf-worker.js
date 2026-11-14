@@ -105,6 +105,7 @@ self.onmessage = async (e) => {
         station.set_answer(!!m.answer);
         if (m.band !== undefined) station.set_band(m.band);
         if (m.ml !== undefined) station.set_ml(!!m.ml);
+        if (m.beamReply !== undefined) station.set_beam_reply(!!m.beamReply);
         audioPort = m.port;
         audioPort.onmessage = onAudio;
         setInterval(pump, 40);
@@ -201,10 +202,14 @@ self.onmessage = async (e) => {
       case "beam-start": {
         // Text and images both travel as bytes; `chunk` is bytes per frame.
         const bytes = m.bytes instanceof Uint8Array ? m.bytes : new TextEncoder().encode(m.text ?? "");
+        station?.set_beam_stop_on_catch(!!m.stopOnCatch);
         const id = station ? station.beam_start_bytes(bytes, m.profile, m.band, m.rounds ?? 0, m.chunk ?? 48) : -1;
         self.postMessage({ type: "beam-started", id, bytes: bytes.length });
         break;
       }
+      case "beam-reply":
+        station?.set_beam_reply(!!m.on);
+        break;
       case "beam-stop":
         station?.beam_stop();
         break;
